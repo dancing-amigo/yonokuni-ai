@@ -144,18 +144,28 @@ class SelfPlayTrainer:
         if metrics:
             keys = metrics[0].keys()
             avg_metrics = {k: float(np.mean([m[k] for m in metrics])) for k in keys}
+        games = self_play_stats["games_played"]
+        team_a_winrate = (self_play_stats["team_a_wins"] / games) if games else 0.0
+        team_b_winrate = (self_play_stats["team_b_wins"] / games) if games else 0.0
+        center_a_rate = (self_play_stats["center_wins_team_a"] / games) if games else 0.0
+        center_b_rate = (self_play_stats["center_wins_team_b"] / games) if games else 0.0
+        center_none_rate = (self_play_stats["center_wins_none"] / games) if games else 0.0
+        avg_moves = self_play_stats.get("average_moves", 0.0)
         if self.writer:
             self.writer.add_scalar("buffer/size", buffer_size, self.iteration_index)
-            if self_play_stats["games_played"]:
-                team_a_winrate = self_play_stats["team_a_wins"] / self_play_stats["games_played"]
-                team_b_winrate = self_play_stats["team_b_wins"] / self_play_stats["games_played"]
-                self.writer.add_scalar("self_play/team_a_winrate", team_a_winrate, self.iteration_index)
-                self.writer.add_scalar("self_play/team_b_winrate", team_b_winrate, self.iteration_index)
+            self.writer.add_scalar("self_play/team_a_winrate", team_a_winrate, self.iteration_index)
+            self.writer.add_scalar("self_play/team_b_winrate", team_b_winrate, self.iteration_index)
+            self.writer.add_scalar("self_play/center_rate_team_a", center_a_rate, self.iteration_index)
+            self.writer.add_scalar("self_play/center_rate_team_b", center_b_rate, self.iteration_index)
+            self.writer.add_scalar("self_play/center_rate_none", center_none_rate, self.iteration_index)
+            self.writer.add_scalar("self_play/average_moves", avg_moves, self.iteration_index)
+            average_death_turns = self_play_stats.get("average_death_turns", [])
+            for idx, value in enumerate(average_death_turns):
+                if value is not None:
+                    self.writer.add_scalar(f"self_play/death_turn_color{idx+1}", value, self.iteration_index)
             for key, value in avg_metrics.items():
                 self.writer.add_scalar(f"train_avg/{key}", value, self.iteration_index)
             self.writer.flush()
-        team_a_winrate = (self_play_stats["team_a_wins"] / self_play_stats["games_played"]) if self_play_stats["games_played"] else 0.0
-        team_b_winrate = (self_play_stats["team_b_wins"] / self_play_stats["games_played"]) if self_play_stats["games_played"] else 0.0
         if self.wandb_run and self._wandb:
             log_data = {f"train_avg/{k}": v for k, v in avg_metrics.items()}
             log_data.update(
@@ -163,12 +173,19 @@ class SelfPlayTrainer:
                     "buffer/size": buffer_size,
                     "self_play/team_a_winrate": team_a_winrate,
                     "self_play/team_b_winrate": team_b_winrate,
+                    "self_play/center_rate_team_a": center_a_rate,
+                    "self_play/center_rate_team_b": center_b_rate,
+                    "self_play/center_rate_none": center_none_rate,
+                    "self_play/average_moves": avg_moves,
                     "iteration": self.iteration_index,
                 }
             )
-            if self_play_stats["games_played"]:
-                log_data["self_play/draw_rate"] = self_play_stats["draws"] / self_play_stats["games_played"]
-                log_data["self_play/avg_moves"] = self_play_stats.get("average_moves", 0.0)
+            if games:
+                log_data["self_play/draw_rate"] = self_play_stats["draws"] / games
+                average_death_turns = self_play_stats.get("average_death_turns", [])
+                for idx, value in enumerate(average_death_turns):
+                    if value is not None:
+                        log_data[f"self_play/death_turn_color{idx+1}"] = value
             self._wandb.log(log_data, step=self.iteration_index)
 
         self.iteration_index += 1

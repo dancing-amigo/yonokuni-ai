@@ -139,8 +139,7 @@ class SelfPlayManager:
         if not schedule:
             return []
         normalized: List[Tuple[int, float]] = []
-        for entry in schedule:
-            ply, temp = entry
+        for ply, temp in schedule:
             normalized.append((int(ply), float(temp)))
         normalized.sort(key=lambda x: x[0])
         if normalized[0][0] != 0:
@@ -157,7 +156,6 @@ class SelfPlayManager:
             current_temp = temp
         return current_temp
 
-
     def generate(self, episodes: int, workers: int = 1) -> Dict[str, object]:
         results: Dict[str, object] = {
             "games_played": 0,
@@ -165,11 +163,16 @@ class SelfPlayManager:
             "team_b_wins": 0,
             "draws": 0,
             "total_moves": 0,
+            "center_wins_team_a": 0,
+            "center_wins_team_b": 0,
+            "center_wins_none": 0,
+            "death_turn_sum": [0.0, 0.0, 0.0, 0.0],
+            "death_turn_count": [0, 0, 0, 0],
         }
         if workers <= 1:
             for _ in range(episodes):
-                game_result, move_count = self._play_single_episode(self.policy)
-                self._accumulate_results(results, game_result, move_count)
+                game_result, move_count, stats = self._play_single_episode(self.policy)
+                self._accumulate_results(results, game_result, move_count, stats)
         else:
             counts = [episodes // workers] * workers
             for i in range(episodes % workers):
@@ -186,39 +189,29 @@ class SelfPlayManager:
                     worker_result = future.result()
                     for key in ("games_played", "team_a_wins", "team_b_wins", "draws", "total_moves"):
                         results[key] += worker_result[key]
+                    results["center_wins_team_a"] += worker_result["center_wins_team_a"]
+                    results["center_wins_team_b"] += worker_result["center_wins_team_b"]
+                    results["center_wins_none"] += worker_result["center_wins_none"]
+                    for idx in range(4):
+                        results["death_turn_sum"][idx] += worker_result["death_turn_sum"][idx]
+                        results["death_turn_count"][idx] += worker_result["death_turn_count"][idx]
         if results["games_played"]:
             results["average_moves"] = results["total_moves"] / results["games_played"]
         else:
             results["average_moves"] = 0.0
+        results["average_death_turns"] = [
+            (results["death_turn_sum"][idx] / results["death_turn_count"][idx])
+            if results["death_turn_count"][idx] > 0
+            else None
+            for idx in range(4)
+        ]
         return results
 
-    def _accumulate_results(self, results: Dict[str, object], game_result: GameResult, move_count: int) -> None:
-        results["games_played"] += 1
-        results["total_moves"] += move_count
-        if game_result == GameResult.TEAM_A_WIN:
-            results["team_a_wins"] += 1
-        elif game_result == GameResult.TEAM_B_WIN:
-            results["team_b_wins"] += 1
-        else:
-            results["draws"] += 1
-
-    def _run_worker(self, policy: Policy, episodes: int, seed: Optional[int] = None) -> Dict[str, object]:
-        worker_results = {
-            "games_played": 0,
-            "team_a_wins": 0,
-            "team_b_wins": 0,
-            "draws": 0,
-            "total_moves": 0,
-        }
-        rng = np.random.default_rng(seed)
-        for _ in range(episodes):
-            game_result, move_count = self._play_single_episode(policy, rng)
-            self._accumulate_results(worker_results, game_result, move_count)
-        return worker_results
-
-
-    # ------------------------------------------------------------------
-    def _play_single_episode(self, policy: Policy, rng: Optional[np.random.Generator] = None) -> Tuple[GameResult, int]:
+    def _play_single_episode(
+        self,
+        policy: Policy,
+        rng: Optional[np.random.Generator] = None,
+    ) -> Tuple[GameResult, int, Dict[str, object]]:
         rng = rng or self.rng
         env = self.env_factory()
         obs, info = env.reset()
@@ -228,6 +221,7 @@ class SelfPlayManager:
         terminated = False
         final_reward = 0.0
         move_index = 0
+        death_turns = [-1, -1, -1, -1]
 
         while not terminated:
             board = obs["board"]
@@ -235,6 +229,7 @@ class SelfPlayManager:
             legal_mask = info["legal_action_mask"]
 
             state_snapshot = env._state.copy()
+            dead_before = state_snapshot.dead_players.copy()
 
             policy_probs = policy.act(state_snapshot, legal_mask)
             if policy_probs.shape != legal_mask.shape:
@@ -259,12 +254,19 @@ class SelfPlayManager:
             action_index = select_action(policy_probs, temperature, rng)
             obs, reward, terminated, truncated, info = env.step(action_index)
             final_reward = reward
+
+            dead_after = env._state.dead_players
+            for idx in range(4):
+                if dead_after[idx] and not dead_before[idx] and death_turns[idx] < 0:
+                    death_turns[idx] = move_index
+
             move_index += 1
             if truncated:
                 terminated = True
 
         final_values = self._final_values(final_reward, trajectory)
         final_result = env._state.result
+        center_team = self._center_team(env._state)
 
         for step, value in zip(trajectory, final_values):
             self.buffer.add(
@@ -277,7 +279,73 @@ class SelfPlayManager:
             )
         move_count = len(trajectory)
         env.close()
-        return final_result, move_count
+        game_stats = {
+            "center_team": center_team,
+            "death_turns": death_turns,
+        }
+        return final_result, move_count, game_stats
+
+    def _center_team(self, state: GameState) -> Optional[str]:
+        centres = [(3, 3), (3, 4), (4, 3), (4, 4)]
+        occupants: List[PlayerColor] = []
+        for r, c in centres:
+            val = state.board[r][c]
+            if val == 0:
+                return None
+            occupants.append(PlayerColor(int(val)))
+        team = team_of_color(occupants[0])
+        if all(team_of_color(piece) == team for piece in occupants):
+            return team
+        return None
+
+    def _accumulate_results(
+        self,
+        results: Dict[str, object],
+        game_result: GameResult,
+        move_count: int,
+        game_stats: Dict[str, object],
+    ) -> None:
+        results["games_played"] += 1
+        results["total_moves"] += move_count
+        if game_result == GameResult.TEAM_A_WIN:
+            results["team_a_wins"] += 1
+        elif game_result == GameResult.TEAM_B_WIN:
+            results["team_b_wins"] += 1
+        else:
+            results["draws"] += 1
+
+        center_team = game_stats.get("center_team")
+        if center_team == "A":
+            results["center_wins_team_a"] += 1
+        elif center_team == "B":
+            results["center_wins_team_b"] += 1
+        else:
+            results["center_wins_none"] += 1
+
+        death_turns = game_stats.get("death_turns", [])
+        for idx, turn in enumerate(death_turns):
+            if turn is not None and turn >= 0:
+                results["death_turn_sum"][idx] += float(turn)
+                results["death_turn_count"][idx] += 1
+
+    def _run_worker(self, policy: Policy, episodes: int, seed: Optional[int] = None) -> Dict[str, object]:
+        worker_results = {
+            "games_played": 0,
+            "team_a_wins": 0,
+            "team_b_wins": 0,
+            "draws": 0,
+            "total_moves": 0,
+            "center_wins_team_a": 0,
+            "center_wins_team_b": 0,
+            "center_wins_none": 0,
+            "death_turn_sum": [0.0, 0.0, 0.0, 0.0],
+            "death_turn_count": [0, 0, 0, 0],
+        }
+        rng = np.random.default_rng(seed)
+        for _ in range(episodes):
+            game_result, move_count, game_stats = self._play_single_episode(policy, rng)
+            self._accumulate_results(worker_results, game_result, move_count, game_stats)
+        return worker_results
 
     def _final_values(self, final_reward: float, trajectory: Sequence[TrajectoryStep]) -> List[float]:
         if final_reward > 0:

@@ -26,6 +26,8 @@ def test_self_play_generates_replay_samples():
     stats = manager.generate(episodes=1)
 
     assert stats["games_played"] == 1
+    assert "center_wins_team_a" in stats
+    assert "average_death_turns" in stats
     assert len(buffer) > 0
     boards, aux, policies, values = buffer.sample(1, apply_symmetry=False)
     assert boards.shape[1:] == (8, 8, 8)
@@ -51,6 +53,8 @@ def test_self_play_with_mcts_policy():
 
     stats = manager.generate(episodes=1)
     assert stats["games_played"] == 1
+    assert "center_wins_team_a" in stats
+    assert "average_death_turns" in stats
     assert len(buffer) > 0
 
 
@@ -65,5 +69,7 @@ def test_self_play_parallel_workers():
     )
     stats = manager.generate(episodes=4, workers=2)
     assert stats["games_played"] == 4
+    assert "center_wins_team_b" in stats
+    assert len(buffer) > 0
 
 
