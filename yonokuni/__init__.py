@@ -19,7 +19,18 @@ from .features import (
     transform_action,
 )
 from .mcts import MCTS, MCTSConfig
-from .models import YonokuniEvaluator, YonokuniNet, YonokuniNetConfig
+from .models import (
+    YonokuniEvaluator,
+    YonokuniNet,
+    YonokuniNetConfig,
+    InferenceRunner,
+    InferenceConfig,
+    ModelMetadata,
+    save_checkpoint,
+    load_checkpoint,
+    export_torchscript,
+    export_onnx,
+)
 from .selfplay import (
     MCTSPolicy,
     RandomPolicy,
@@ -63,6 +74,13 @@ __all__ = [
     "YonokuniNet",
     "YonokuniNetConfig",
     "YonokuniEvaluator",
+    "InferenceRunner",
+    "InferenceConfig",
+    "ModelMetadata",
+    "save_checkpoint",
+    "load_checkpoint",
+    "export_torchscript",
+    "export_onnx",
     "ReplayBuffer",
     "ReplaySample",
     "MCTSPolicy",
