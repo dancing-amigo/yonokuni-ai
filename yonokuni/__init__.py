@@ -1,6 +1,6 @@
 """Yonokuni AI core package."""
 
-from . import core, env, features, mcts, selfplay
+from . import core, env, features, mcts, selfplay, models, training
 from .env import YonokuniEnv
 from .features import (
     AUX_VECTOR_SIZE,
@@ -19,12 +19,23 @@ from .features import (
     transform_action,
 )
 from .mcts import MCTS, MCTSConfig
-from .selfplay import MCTSPolicy, RandomPolicy, ReplayBuffer, ReplaySample, SelfPlayManager
+from .models import YonokuniEvaluator, YonokuniNet, YonokuniNetConfig
+from .selfplay import (
+    MCTSPolicy,
+    RandomPolicy,
+    ReplayBuffer,
+    ReplaySample,
+    SelfPlayManager,
+    make_mcts_policy_from_model,
+)
+from .training import TrainingConfig, Trainer, TrainingStepOutput
 
 __all__ = [
     "core",
     "env",
     "features",
+    "models",
+    "training",
     "mcts",
     "selfplay",
     "YonokuniEnv",
@@ -44,9 +55,16 @@ __all__ = [
     "transform_action",
     "MCTS",
     "MCTSConfig",
+    "YonokuniNet",
+    "YonokuniNetConfig",
+    "YonokuniEvaluator",
     "ReplayBuffer",
     "ReplaySample",
     "MCTSPolicy",
+    "make_mcts_policy_from_model",
     "RandomPolicy",
     "SelfPlayManager",
+    "TrainingConfig",
+    "Trainer",
+    "TrainingStepOutput",
 ]

@@ -1,10 +1,15 @@
 import numpy as np
 
 from yonokuni import YonokuniEnv
-from yonokuni.core import ACTION_VECTOR_SIZE, encode_action, enumerate_legal_actions
 from yonokuni.features import Transform
 from yonokuni.mcts import MCTSConfig
-from yonokuni.selfplay import MCTSPolicy, RandomPolicy, ReplayBuffer, SelfPlayManager
+from yonokuni.models import YonokuniNet, YonokuniNetConfig
+from yonokuni.selfplay import (
+    RandomPolicy,
+    ReplayBuffer,
+    SelfPlayManager,
+    make_mcts_policy_from_model,
+)
 
 
 def test_self_play_generates_replay_samples():
@@ -28,19 +33,13 @@ def test_self_play_generates_replay_samples():
     assert np.all(np.abs(values) <= 1.0)
 
 
-def uniform_evaluator(state):
-    legal = enumerate_legal_actions(state)
-    policy = np.zeros(ACTION_VECTOR_SIZE, dtype=np.float32)
-    for action in legal:
-        policy[encode_action(action)] = 1.0
-    if legal:
-        policy /= len(legal)
-    return policy, 0.0
-
-
 def test_self_play_with_mcts_policy():
     buffer = ReplayBuffer(256, transforms=[Transform.IDENTITY], seed=1)
-    policy = MCTSPolicy(uniform_evaluator, config=MCTSConfig(num_simulations=8, dirichlet_alpha=0.0))
+    model = YonokuniNet(YonokuniNetConfig(channels=32, num_blocks=2))
+    policy = make_mcts_policy_from_model(
+        model,
+        config=MCTSConfig(num_simulations=8, dirichlet_alpha=0.0),
+    )
     manager = SelfPlayManager(
         buffer,
         policy=policy,

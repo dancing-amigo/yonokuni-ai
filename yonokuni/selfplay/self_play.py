@@ -8,7 +8,13 @@ import numpy as np
 from yonokuni.env import YonokuniEnv
 from yonokuni.core import GameState, PlayerColor
 from yonokuni.mcts import MCTS, MCTSConfig
+from yonokuni.models import YonokuniEvaluator
 from yonokuni.selfplay.replay_buffer import ReplayBuffer, ReplaySample
+
+try:
+    import torch
+except ImportError:  # pragma: no cover
+    torch = None
 
 
 def team_of_color(color: PlayerColor) -> str:
@@ -52,6 +58,24 @@ class MCTSPolicy(Policy):
         if total > 0:
             policy /= total
         return policy
+
+
+def make_mcts_policy_from_model(
+    model,
+    config: Optional[MCTSConfig] = None,
+    *,
+    device: Optional["torch.device"] = None,
+    dtype: "torch.dtype" = torch.float32,
+    rng: Optional[np.random.Generator] = None,
+) -> MCTSPolicy:
+    if torch is None:
+        raise RuntimeError("PyTorch is required to use make_mcts_policy_from_model.")
+    evaluator = YonokuniEvaluator(model, device=device, dtype=dtype)
+
+    def eval_fn(state: GameState) -> Tuple[np.ndarray, float]:
+        return evaluator.predict(state)
+
+    return MCTSPolicy(eval_fn, config=config, rng=rng)
 
 
 def select_action(probabilities: np.ndarray, temperature: float, rng: np.random.Generator) -> int:
