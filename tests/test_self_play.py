@@ -23,8 +23,9 @@ def test_self_play_generates_replay_samples():
         seed=123,
     )
 
-    manager.generate(episodes=1)
+    stats = manager.generate(episodes=1)
 
+    assert stats["games_played"] == 1
     assert len(buffer) > 0
     boards, aux, policies, values = buffer.sample(1, apply_symmetry=False)
     assert boards.shape[1:] == (8, 8, 8)
@@ -48,5 +49,6 @@ def test_self_play_with_mcts_policy():
         seed=321,
     )
 
-    manager.generate(episodes=1)
+    stats = manager.generate(episodes=1)
+    assert stats["games_played"] == 1
     assert len(buffer) > 0

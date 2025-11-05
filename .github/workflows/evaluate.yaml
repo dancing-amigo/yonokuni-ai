@@ -1,0 +1,31 @@
+name: evaluate-model
+
+on:
+  workflow_dispatch:
+    inputs:
+      checkpoint:
+        description: 'Model checkpoint path'
+        required: true
+      baseline:
+        description: 'Baseline checkpoint path or random/rule'
+        required: true
+      episodes:
+        description: 'Number of evaluation games'
+        required: false
+        default: '50'
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+      - name: Run evaluation
+        run: |
+          python scripts/evaluate_legacy.py             ${{ github.event.inputs.checkpoint }}             ${{ github.event.inputs.baseline }}             --episodes ${{ github.event.inputs.episodes }}

@@ -48,3 +48,19 @@ def test_replay_buffer_sample_no_symmetry_returns_original():
     np.testing.assert_array_equal(aux[0], sample.aux)
     np.testing.assert_array_equal(policies[0], sample.policy)
     assert values[0] == sample.value
+
+
+def test_replay_buffer_state_roundtrip(tmp_path):
+    sample = make_simple_sample()
+    buffer = ReplayBuffer(10, transforms=[Transform.IDENTITY], seed=0)
+    buffer.add(sample)
+    state = buffer.to_state()
+
+    new_buffer = ReplayBuffer(10, transforms=[Transform.IDENTITY], seed=1)
+    new_buffer.load_state(state)
+    assert len(new_buffer) == len(buffer)
+
+    save_path = tmp_path / 'buffer.pkl'
+    buffer.save(save_path.as_posix())
+    restored = ReplayBuffer.load(save_path.as_posix(), capacity=10, transforms=[Transform.IDENTITY], seed=2)
+    assert len(restored) == len(buffer)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pickle
 from collections import deque
 from dataclasses import dataclass
 from typing import Deque, Iterable, List, Optional, Sequence, Tuple
@@ -104,6 +105,64 @@ class ReplayBuffer:
             np.stack(policies, axis=0),
             np.asarray(values, dtype=np.float32),
         )
+
+    # ------------------------------------------------------------------
+    def to_state(self) -> dict:
+        transforms = [
+            t.name if isinstance(t, Transform) else t for t in self.transforms
+        ]
+        return {
+            "capacity": self.capacity,
+            "transforms": transforms,
+            "rng_state": self.rng.bit_generator.state,
+            "samples": [sample.copy() for sample in self._buffer],
+        }
+
+    def load_state(self, state: dict) -> None:
+        transforms = state.get("transforms")
+        if transforms:
+            self.transforms = [
+                Transform[name] if isinstance(name, str) else name for name in transforms
+            ]
+            if Transform.IDENTITY not in self.transforms:
+                self.transforms.append(Transform.IDENTITY)
+
+        samples = state.get("samples", [])
+        self._buffer = deque(maxlen=self.capacity)
+        for sample in samples:
+            if isinstance(sample, ReplaySample):
+                self._buffer.append(sample.copy())
+            else:
+                raise ValueError("Replay buffer state contains invalid sample type.")
+
+        rng_state = state.get("rng_state")
+        if rng_state is not None:
+            self.rng = np.random.default_rng()
+            self.rng.bit_generator.state = rng_state
+
+    def save(self, path: str) -> None:
+        with open(path, "wb") as fh:
+            pickle.dump(self.to_state(), fh)
+
+    @classmethod
+    def load(
+        cls,
+        path: str,
+        *,
+        capacity: Optional[int] = None,
+        transforms: Optional[Sequence[Transform]] = None,
+        seed: Optional[int] = None,
+    ) -> "ReplayBuffer":
+        with open(path, "rb") as fh:
+            state = pickle.load(fh)
+        buffer_capacity = capacity or state.get("capacity", 0)
+        buffer = cls(
+            capacity=buffer_capacity,
+            transforms=transforms,
+            seed=seed,
+        )
+        buffer.load_state(state)
+        return buffer
 
     # ------------------------------------------------------------------
     def _sample_indices(self, batch_size: int, *, replace: bool) -> np.ndarray:

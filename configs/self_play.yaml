@@ -1,0 +1,17 @@
+episodes_per_iteration: 8
+training_steps_per_iteration: 16
+buffer_capacity: 500000
+temperature: 1.0
+checkpoint_interval: 10
+log_dir: logs/run_iteration
+mcts:
+  num_simulations: 64
+  dirichlet_alpha: 0.0
+  dirichlet_fraction: 0.25
+training:
+  batch_size: 32
+  apply_symmetry: true
+  policy_weight: 1.0
+  value_weight: 1.0
+  l2_weight: 0.0001
+  grad_clip: 1.0

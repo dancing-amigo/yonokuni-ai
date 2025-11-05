@@ -29,6 +29,7 @@ class TrainingStepOutput:
     value_loss: float
     l2_loss: float
     total_loss: float
+    policy_entropy: float
 
     def as_dict(self) -> Dict[str, float]:
         return {
@@ -36,6 +37,7 @@ class TrainingStepOutput:
             "value_loss": self.value_loss,
             "l2_loss": self.l2_loss,
             "total_loss": self.total_loss,
+            "policy_entropy": self.policy_entropy,
         }
 
 
@@ -72,7 +74,9 @@ class Trainer:
         policy_logits, value_pred = self.model(board_tensor, aux_tensor)
 
         log_probs = F.log_softmax(policy_logits, dim=-1)
+        probs = torch.softmax(policy_logits, dim=-1)
         policy_loss = -(policy_target * log_probs).sum(dim=-1).mean()
+        policy_entropy = -(probs * log_probs).sum(dim=-1).mean()
 
         value_loss = F.mse_loss(value_pred, value_target)
 
@@ -99,4 +103,5 @@ class Trainer:
             value_loss=float(value_loss.detach().cpu().item()),
             l2_loss=float(l2_loss.detach().cpu().item()),
             total_loss=float(total_loss.detach().cpu().item()),
+            policy_entropy=float(policy_entropy.detach().cpu().item()),
         )

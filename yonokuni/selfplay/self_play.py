@@ -6,7 +6,7 @@ from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 
 from yonokuni.env import YonokuniEnv
-from yonokuni.core import GameState, PlayerColor
+from yonokuni.core import GameState, PlayerColor, GameResult
 from yonokuni.mcts import MCTS, MCTSConfig
 from yonokuni.models import YonokuniEvaluator
 from yonokuni.selfplay.replay_buffer import ReplayBuffer, ReplaySample
@@ -113,9 +113,29 @@ class SelfPlayManager:
         self.temperature = temperature
         self.rng = np.random.default_rng(seed)
 
-    def generate(self, episodes: int) -> None:
+    def generate(self, episodes: int) -> Dict[str, object]:
+        results: Dict[str, object] = {
+            "games_played": 0,
+            "team_a_wins": 0,
+            "team_b_wins": 0,
+            "draws": 0,
+            "total_moves": 0,
+        }
         for _ in range(episodes):
-            self._play_single_episode()
+            game_result, move_count = self._play_single_episode()
+            results["games_played"] += 1
+            results["total_moves"] += move_count
+            if game_result == GameResult.TEAM_A_WIN:
+                results["team_a_wins"] += 1
+            elif game_result == GameResult.TEAM_B_WIN:
+                results["team_b_wins"] += 1
+            else:
+                results["draws"] += 1
+        if results["games_played"]:
+            results["average_moves"] = results["total_moves"] / results["games_played"]
+        else:
+            results["average_moves"] = 0.0
+        return results
 
     # ------------------------------------------------------------------
     def _play_single_episode(self) -> None:
@@ -160,6 +180,7 @@ class SelfPlayManager:
                 terminated = True
 
         final_values = self._final_values(final_reward, trajectory)
+        final_result = env._state.result
 
         for step, value in zip(trajectory, final_values):
             self.buffer.add(
@@ -170,7 +191,9 @@ class SelfPlayManager:
                     value=value,
                 )
             )
+        move_count = len(trajectory)
         env.close()
+        return final_result, move_count
 
     def _final_values(self, final_reward: float, trajectory: Sequence[TrajectoryStep]) -> List[float]:
         if final_reward > 0:
