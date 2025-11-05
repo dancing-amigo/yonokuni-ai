@@ -10,16 +10,18 @@ from yonokuni.core import (
     ACTION_VECTOR_SIZE,
     Action,
     GameResult,
-    PlayerColor,
     apply_action,
     decode_action,
     encode_action,
     enumerate_legal_actions,
     initialize_game_state,
 )
-
-BOARD_CHANNELS = 8  # R_alive, R_dead, B_alive, B_dead, Y_alive, Y_dead, G_alive, G_dead
-AUX_VECTOR_SIZE = 8  # current player one-hot (4) + dead flags (4)
+from yonokuni.features import (
+    AUX_VECTOR_SIZE,
+    BOARD_CHANNELS,
+    build_aux_vector,
+    build_board_tensor,
+)
 
 
 class YonokuniEnv(gym.Env):
@@ -94,21 +96,9 @@ class YonokuniEnv(gym.Env):
     # Helpers
     # ------------------------------------------------------------------
     def _build_observation(self) -> Dict[str, np.ndarray]:
-        board_tensor = np.zeros((BOARD_CHANNELS, 8, 8), dtype=np.float32)
-        for (row, col), value in np.ndenumerate(self._state.board):
-            if value == 0:
-                continue
-            color = PlayerColor(int(value))
-            dead = bool(self._state.dead_mask[row, col])
-            channel_offset = (int(color) - 1) * 2
-            channel = channel_offset + (1 if dead else 0)
-            board_tensor[channel, row, col] = 1.0
-
-        aux = np.zeros((AUX_VECTOR_SIZE,), dtype=np.float32)
-        aux[int(self._state.current_player) - 1] = 1.0
-        aux[4:] = self._state.dead_players.astype(np.float32)
-
-        return {"board": board_tensor, "aux": aux}
+        board = build_board_tensor(self._state)
+        aux = build_aux_vector(self._state)
+        return {"board": board, "aux": aux}
 
     def _build_info(self) -> Dict[str, np.ndarray]:
         return {"legal_action_mask": self.legal_action_mask()}
