@@ -34,6 +34,7 @@ def main() -> None:
     parser.add_argument("--wandb-project")
     parser.add_argument("--wandb-run-name")
     parser.add_argument("--wandb-entity")
+    parser.add_argument("--resume-from", type=str, help="Checkpoint path to resume from")
     args = parser.parse_args()
 
     cfg = {}
@@ -45,10 +46,12 @@ def main() -> None:
     train_steps = args.train_steps if args.train_steps is not None else cfg.get("training_steps_per_iteration", 16)
     log_dir = args.log_dir if args.log_dir is not None else cfg.get("log_dir")
     checkpoint_dir = args.checkpoint_dir if args.checkpoint_dir is not None else cfg.get("checkpoint_dir")
-    checkpoint_interval = args.checkpoint_interval if args.checkpoint_interval is not None else cfg.get("checkpoint_interval", 10)
+    checkpoint_interval = args.checkpoint_interval if args.checkpoint_interval is not None else cfg.get(
+        "checkpoint_interval", 10)
     temperature = args.temperature if args.temperature is not None else cfg.get("temperature", 1.0)
     workers = args.self_play_workers if args.self_play_workers is not None else cfg.get("self_play_workers", 1)
-    validation_sample_size = args.validation_sample_size if args.validation_sample_size is not None else cfg.get("validation_sample_size", 0)
+    validation_sample_size = args.validation_sample_size if args.validation_sample_size is not None else cfg.get(
+        "validation_sample_size", 0)
     temperature_schedule = cfg.get("temperature_schedule")
 
     mcts_cfg = cfg.get("mcts", {})
@@ -78,6 +81,8 @@ def main() -> None:
     )
 
     trainer = SelfPlayTrainer(config)
+    if args.resume_from:
+        trainer.load_checkpoint(args.resume_from)
     try:
         iterator = trange(args.iterations, desc="Iterations") if trange is not range else range(args.iterations)
         for i in iterator:
