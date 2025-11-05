@@ -3,16 +3,32 @@ name: evaluate-model
 on:
   workflow_dispatch:
     inputs:
-      checkpoint:
-        description: 'Model checkpoint path'
+      current_checkpoint:
+        description: 'Current model checkpoint path or identifier'
         required: true
-      baseline:
-        description: 'Baseline checkpoint path or random/rule'
+      baseline_checkpoint:
+        description: 'Baseline checkpoint path or identifier (random/rule allowed)'
         required: true
       episodes:
-        description: 'Number of evaluation games'
+        description: 'Number of games to evaluate'
         required: false
         default: '50'
+      mcts_simulations:
+        description: 'MCTS simulations'
+        required: false
+        default: '64'
+      dirichlet_alpha:
+        description: 'Dirichlet alpha'
+        required: false
+        default: '0.0'
+      threshold:
+        description: 'Promotion threshold'
+        required: false
+        default: '0.55'
+      min_games:
+        description: 'Minimum games for gating'
+        required: false
+        default: '40'
 
 jobs:
   evaluate:
@@ -28,4 +44,19 @@ jobs:
           pip install -e .[dev]
       - name: Run evaluation
         run: |
-          python scripts/evaluate_legacy.py             ${{ github.event.inputs.checkpoint }}             ${{ github.event.inputs.baseline }}             --episodes ${{ github.event.inputs.episodes }}
+          python scripts/evaluate_legacy.py \
+            "${{ github.event.inputs.current_checkpoint }}" \
+            "${{ github.event.inputs.baseline_checkpoint }}" \
+            --episodes ${{ github.event.inputs.episodes }} \
+            --mcts-simulations ${{ github.event.inputs.mcts_simulations }} \
+            --dirichlet-alpha ${{ github.event.inputs.dirichlet_alpha }}
+      - name: Run gating decision
+        run: |
+          python scripts/gate_model.py \
+            "${{ github.event.inputs.current_checkpoint }}" \
+            "${{ github.event.inputs.baseline_checkpoint }}" \
+            --episodes ${{ github.event.inputs.episodes }} \
+            --mcts-simulations ${{ github.event.inputs.mcts_simulations }} \
+            --dirichlet-alpha ${{ github.event.inputs.dirichlet_alpha }} \
+            --threshold ${{ github.event.inputs.threshold }} \
+            --min-games ${{ github.event.inputs.min_games }}
