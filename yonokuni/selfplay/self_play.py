@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
-from typing import Callable, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
 
 from yonokuni.env import YonokuniEnv
 from yonokuni.core import GameState, PlayerColor, GameResult
@@ -27,6 +29,10 @@ class Policy:
     def act(self, state: GameState, legal_mask: np.ndarray) -> np.ndarray:
         raise NotImplementedError
 
+    def spawn(self, seed: Optional[int] = None) -> "Policy":
+        """Return a copy of this policy for parallel execution."""
+        return self
+
 
 class RandomPolicy(Policy):
     def __init__(self, rng: Optional[np.random.Generator] = None) -> None:
@@ -39,6 +45,10 @@ class RandomPolicy(Policy):
         probs = logits / logits.sum()
         return probs.astype(np.float32, copy=True)
 
+    def spawn(self, seed: Optional[int] = None) -> "RandomPolicy":
+        rng = np.random.default_rng(seed)
+        return RandomPolicy(rng)
+
 
 class MCTSPolicy(Policy):
     def __init__(
@@ -48,7 +58,9 @@ class MCTSPolicy(Policy):
         *,
         rng: Optional[np.random.Generator] = None,
     ) -> None:
-        self.mcts = MCTS(evaluator, config=config, rng=rng)
+        self._config = deepcopy(config) if config else MCTSConfig()
+        self._evaluator = evaluator
+        self.mcts = MCTS(evaluator, config=self._config, rng=rng or np.random.default_rng())
 
     def act(self, state: GameState, legal_mask: np.ndarray) -> np.ndarray:
         result = self.mcts.run(state)
@@ -58,6 +70,10 @@ class MCTSPolicy(Policy):
         if total > 0:
             policy /= total
         return policy
+
+    def spawn(self, seed: Optional[int] = None) -> "MCTSPolicy":
+        rng = np.random.default_rng(seed)
+        return MCTSPolicy(self._evaluator, config=self._config, rng=rng)
 
 
 def make_mcts_policy_from_model(
@@ -105,6 +121,7 @@ class SelfPlayManager:
         *,
         env_factory: Callable[[], YonokuniEnv] = YonokuniEnv,
         temperature: float = 1.0,
+        temperature_schedule: Optional[Sequence[Tuple[int, float]]] = None,
         seed: Optional[int] = None,
     ) -> None:
         self.buffer = buffer
@@ -112,8 +129,36 @@ class SelfPlayManager:
         self.env_factory = env_factory
         self.temperature = temperature
         self.rng = np.random.default_rng(seed)
+        self.temperature_schedule = self._normalize_schedule(temperature_schedule, default=temperature)
 
-    def generate(self, episodes: int) -> Dict[str, object]:
+    def _normalize_schedule(
+        self,
+        schedule: Optional[Sequence[Tuple[int, float]]],
+        default: float,
+    ) -> List[Tuple[int, float]]:
+        if not schedule:
+            return []
+        normalized: List[Tuple[int, float]] = []
+        for entry in schedule:
+            ply, temp = entry
+            normalized.append((int(ply), float(temp)))
+        normalized.sort(key=lambda x: x[0])
+        if normalized[0][0] != 0:
+            normalized.insert(0, (0, default))
+        return normalized
+
+    def _temperature_for_move(self, move_index: int) -> float:
+        if not self.temperature_schedule:
+            return self.temperature
+        current_temp = self.temperature_schedule[0][1]
+        for threshold, temp in self.temperature_schedule:
+            if move_index < threshold:
+                return current_temp
+            current_temp = temp
+        return current_temp
+
+
+    def generate(self, episodes: int, workers: int = 1) -> Dict[str, object]:
         results: Dict[str, object] = {
             "games_played": 0,
             "team_a_wins": 0,
@@ -121,24 +166,60 @@ class SelfPlayManager:
             "draws": 0,
             "total_moves": 0,
         }
-        for _ in range(episodes):
-            game_result, move_count = self._play_single_episode()
-            results["games_played"] += 1
-            results["total_moves"] += move_count
-            if game_result == GameResult.TEAM_A_WIN:
-                results["team_a_wins"] += 1
-            elif game_result == GameResult.TEAM_B_WIN:
-                results["team_b_wins"] += 1
-            else:
-                results["draws"] += 1
+        if workers <= 1:
+            for _ in range(episodes):
+                game_result, move_count = self._play_single_episode(self.policy)
+                self._accumulate_results(results, game_result, move_count)
+        else:
+            counts = [episodes // workers] * workers
+            for i in range(episodes % workers):
+                counts[i] += 1
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = []
+                for count in counts:
+                    if count == 0:
+                        continue
+                    seed = int(self.rng.integers(2**32))
+                    policy = self.policy.spawn(seed)
+                    futures.append(executor.submit(self._run_worker, policy, count, seed))
+                for future in futures:
+                    worker_result = future.result()
+                    for key in ("games_played", "team_a_wins", "team_b_wins", "draws", "total_moves"):
+                        results[key] += worker_result[key]
         if results["games_played"]:
             results["average_moves"] = results["total_moves"] / results["games_played"]
         else:
             results["average_moves"] = 0.0
         return results
 
+    def _accumulate_results(self, results: Dict[str, object], game_result: GameResult, move_count: int) -> None:
+        results["games_played"] += 1
+        results["total_moves"] += move_count
+        if game_result == GameResult.TEAM_A_WIN:
+            results["team_a_wins"] += 1
+        elif game_result == GameResult.TEAM_B_WIN:
+            results["team_b_wins"] += 1
+        else:
+            results["draws"] += 1
+
+    def _run_worker(self, policy: Policy, episodes: int, seed: Optional[int] = None) -> Dict[str, object]:
+        worker_results = {
+            "games_played": 0,
+            "team_a_wins": 0,
+            "team_b_wins": 0,
+            "draws": 0,
+            "total_moves": 0,
+        }
+        rng = np.random.default_rng(seed)
+        for _ in range(episodes):
+            game_result, move_count = self._play_single_episode(policy, rng)
+            self._accumulate_results(worker_results, game_result, move_count)
+        return worker_results
+
+
     # ------------------------------------------------------------------
-    def _play_single_episode(self) -> None:
+    def _play_single_episode(self, policy: Policy, rng: Optional[np.random.Generator] = None) -> Tuple[GameResult, int]:
+        rng = rng or self.rng
         env = self.env_factory()
         obs, info = env.reset()
 
@@ -146,6 +227,7 @@ class SelfPlayManager:
 
         terminated = False
         final_reward = 0.0
+        move_index = 0
 
         while not terminated:
             board = obs["board"]
@@ -154,7 +236,7 @@ class SelfPlayManager:
 
             state_snapshot = env._state.copy()
 
-            policy_probs = self.policy.act(state_snapshot, legal_mask)
+            policy_probs = policy.act(state_snapshot, legal_mask)
             if policy_probs.shape != legal_mask.shape:
                 raise ValueError("Policy output shape mismatch.")
             policy_probs = policy_probs * legal_mask
@@ -173,9 +255,11 @@ class SelfPlayManager:
                 )
             )
 
-            action_index = select_action(policy_probs, self.temperature, self.rng)
+            temperature = self._temperature_for_move(move_index)
+            action_index = select_action(policy_probs, temperature, rng)
             obs, reward, terminated, truncated, info = env.step(action_index)
             final_reward = reward
+            move_index += 1
             if truncated:
                 terminated = True
 

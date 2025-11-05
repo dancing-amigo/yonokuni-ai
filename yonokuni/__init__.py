@@ -1,6 +1,6 @@
 """Yonokuni AI core package."""
 
-from . import core, env, features, mcts, selfplay, models, training, evaluation
+from . import core, env, features, mcts, selfplay, models, training, evaluation, validation
 from .env import YonokuniEnv
 from .features import (
     AUX_VECTOR_SIZE,
@@ -30,6 +30,7 @@ from .selfplay import (
 )
 from .training import TrainingConfig, Trainer, TrainingStepOutput
 from .evaluation import EvaluationResult, evaluate_policies
+from .validation import validate_batch, validate_buffer_sample
 from .orchestration import SelfPlayTrainer, SelfPlayTrainerConfig
 
 __all__ = [
@@ -39,6 +40,7 @@ __all__ = [
     "models",
     "training",
     "evaluation",
+    "validation",
     "mcts",
     "selfplay",
     "YonokuniEnv",

@@ -2,6 +2,12 @@ episodes_per_iteration: 8
 training_steps_per_iteration: 16
 buffer_capacity: 500000
 temperature: 1.0
+temperature_schedule:
+  - [0, 1.0]
+  - [40, 0.7]
+  - [80, 0.3]
+self_play_workers: 2
+validation_sample_size: 32
 checkpoint_interval: 10
 log_dir: logs/run_iteration
 mcts:

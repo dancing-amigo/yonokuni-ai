@@ -11,6 +11,7 @@ from yonokuni import Transform, YonokuniEnv
 from yonokuni.mcts import MCTSConfig
 from yonokuni.models import YonokuniNet, YonokuniNetConfig
 from yonokuni.selfplay import ReplayBuffer, SelfPlayManager, make_mcts_policy_from_model
+from yonokuni.validation import validate_buffer_sample
 from yonokuni.training import Trainer, TrainingConfig
 
 try:
@@ -29,6 +30,9 @@ class SelfPlayTrainerConfig:
     training_config: TrainingConfig = field(default_factory=TrainingConfig)
     model_config: YonokuniNetConfig = field(default_factory=YonokuniNetConfig)
     temperature: float = 1.0
+    temperature_schedule: Optional[list] = None
+    self_play_workers: int = 1
+    validation_sample_size: int = 0
     seed: Optional[int] = None
     env_factory: Callable[[], YonokuniEnv] = YonokuniEnv
     log_dir: Optional[str] = None
@@ -84,6 +88,7 @@ class SelfPlayTrainer:
             policy=policy,
             env_factory=config.env_factory,
             temperature=config.temperature,
+            temperature_schedule=config.temperature_schedule,
             seed=config.seed,
         )
 
@@ -117,7 +122,10 @@ class SelfPlayTrainer:
         self.training_step_count = 0
 
     def iteration(self) -> Dict[str, object]:
-        self_play_stats = self.self_play.generate(self.config.episodes_per_iteration)
+        self_play_stats = self.self_play.generate(
+            self.config.episodes_per_iteration,
+            workers=self.config.self_play_workers,
+        )
 
         metrics = []
         for _ in range(self.config.training_steps_per_iteration):
@@ -127,6 +135,9 @@ class SelfPlayTrainer:
                 for key, value in result.items():
                     self.writer.add_scalar(f"train/{key}", value, self.training_step_count)
             self.training_step_count += 1
+
+        if self.config.validation_sample_size > 0 and len(self.replay_buffer) >= self.config.validation_sample_size:
+            validate_buffer_sample(self.replay_buffer, self.config.validation_sample_size)
 
         buffer_size = len(self.replay_buffer)
         avg_metrics = {}

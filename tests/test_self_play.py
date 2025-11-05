@@ -52,3 +52,18 @@ def test_self_play_with_mcts_policy():
     stats = manager.generate(episodes=1)
     assert stats["games_played"] == 1
     assert len(buffer) > 0
+
+
+def test_self_play_parallel_workers():
+    buffer = ReplayBuffer(128, transforms=[Transform.IDENTITY], seed=0)
+    policy = RandomPolicy(np.random.default_rng(5))
+    manager = SelfPlayManager(
+        buffer,
+        policy=policy,
+        env_factory=lambda: YonokuniEnv(max_ply=10),
+        temperature=1.0,
+    )
+    stats = manager.generate(episodes=4, workers=2)
+    assert stats["games_played"] == 4
+
+

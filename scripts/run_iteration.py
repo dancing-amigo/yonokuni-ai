@@ -23,6 +23,9 @@ def main() -> None:
     parser.add_argument("--checkpoint-interval", type=int)
     parser.add_argument("--mcts-simulations", type=int)
     parser.add_argument("--dirichlet-alpha", type=float)
+    parser.add_argument("--temperature", type=float)
+    parser.add_argument("--self-play-workers", type=int)
+    parser.add_argument("--validation-sample-size", type=int)
     parser.add_argument("--wandb-project")
     parser.add_argument("--wandb-run-name")
     parser.add_argument("--wandb-entity")
@@ -38,6 +41,10 @@ def main() -> None:
     log_dir = args.log_dir if args.log_dir is not None else cfg.get("log_dir")
     checkpoint_dir = args.checkpoint_dir if args.checkpoint_dir is not None else cfg.get("checkpoint_dir")
     checkpoint_interval = args.checkpoint_interval if args.checkpoint_interval is not None else cfg.get("checkpoint_interval", 10)
+    temperature = args.temperature if args.temperature is not None else cfg.get("temperature", 1.0)
+    workers = args.self_play_workers if args.self_play_workers is not None else cfg.get("self_play_workers", 1)
+    validation_sample_size = args.validation_sample_size if args.validation_sample_size is not None else cfg.get("validation_sample_size", 0)
+    temperature_schedule = cfg.get("temperature_schedule")
 
     mcts_cfg = cfg.get("mcts", {})
     if args.mcts_simulations is not None:
@@ -55,6 +62,10 @@ def main() -> None:
         log_dir=log_dir,
         checkpoint_dir=checkpoint_dir,
         checkpoint_interval=checkpoint_interval,
+        temperature=temperature,
+        temperature_schedule=temperature_schedule,
+        self_play_workers=workers,
+        validation_sample_size=validation_sample_size,
         mcts_config=mcts,
         wandb_project=args.wandb_project or cfg.get("wandb_project"),
         wandb_run_name=args.wandb_run_name or cfg.get("wandb_run_name"),
