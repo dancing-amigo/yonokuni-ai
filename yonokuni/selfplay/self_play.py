@@ -6,7 +6,8 @@ from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 
 from yonokuni.env import YonokuniEnv
-from yonokuni.core import PlayerColor
+from yonokuni.core import GameState, PlayerColor
+from yonokuni.mcts import MCTS, MCTSConfig
 from yonokuni.selfplay.replay_buffer import ReplayBuffer, ReplaySample
 
 
@@ -17,12 +18,7 @@ def team_of_color(color: PlayerColor) -> str:
 class Policy:
     """Policy interface producing action probabilities over legal moves."""
 
-    def act(
-        self,
-        board: np.ndarray,
-        aux: np.ndarray,
-        legal_mask: np.ndarray,
-    ) -> np.ndarray:
+    def act(self, state: GameState, legal_mask: np.ndarray) -> np.ndarray:
         raise NotImplementedError
 
 
@@ -30,12 +26,32 @@ class RandomPolicy(Policy):
     def __init__(self, rng: Optional[np.random.Generator] = None) -> None:
         self.rng = rng or np.random.default_rng()
 
-    def act(self, board: np.ndarray, aux: np.ndarray, legal_mask: np.ndarray) -> np.ndarray:
+    def act(self, state: GameState, legal_mask: np.ndarray) -> np.ndarray:
         logits = legal_mask.astype(np.float64)
         if logits.sum() == 0:
             return logits
         probs = logits / logits.sum()
         return probs.astype(np.float32, copy=True)
+
+
+class MCTSPolicy(Policy):
+    def __init__(
+        self,
+        evaluator: Callable[[GameState], Tuple[np.ndarray, float]],
+        config: Optional[MCTSConfig] = None,
+        *,
+        rng: Optional[np.random.Generator] = None,
+    ) -> None:
+        self.mcts = MCTS(evaluator, config=config, rng=rng)
+
+    def act(self, state: GameState, legal_mask: np.ndarray) -> np.ndarray:
+        result = self.mcts.run(state)
+        policy = result.policy.astype(np.float32, copy=True)
+        policy *= legal_mask
+        total = policy.sum()
+        if total > 0:
+            policy /= total
+        return policy
 
 
 def select_action(probabilities: np.ndarray, temperature: float, rng: np.random.Generator) -> int:
@@ -92,7 +108,9 @@ class SelfPlayManager:
             aux = obs["aux"]
             legal_mask = info["legal_action_mask"]
 
-            policy_probs = self.policy.act(board, aux, legal_mask)
+            state_snapshot = env._state.copy()
+
+            policy_probs = self.policy.act(state_snapshot, legal_mask)
             if policy_probs.shape != legal_mask.shape:
                 raise ValueError("Policy output shape mismatch.")
             policy_probs = policy_probs * legal_mask
@@ -100,8 +118,7 @@ class SelfPlayManager:
                 raise ValueError("Policy assigned zero probability to legal moves.")
             policy_probs = policy_probs / policy_probs.sum()
 
-            current_player_idx = int(np.argmax(aux[:4]))
-            current_player = PlayerColor(current_player_idx + 1)
+            current_player = state_snapshot.current_player
 
             trajectory.append(
                 TrajectoryStep(
