@@ -1,0 +1,20 @@
+{
+  "moves": [
+    {
+      "player": "human",
+      "action_index": 100
+    },
+    {
+      "player": "human",
+      "action_index": 220
+    },
+    {
+      "player": "human",
+      "action_index": 345
+    },
+    {
+      "player": "human",
+      "action_index": 567
+    }
+  ]
+}

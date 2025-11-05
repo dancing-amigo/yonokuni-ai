@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Play Yonokuni against an AI policy via the console."""
+"""Play Yonokuni against an AI policy via the console, with optional logging & replay."""
 
 import argparse
+import json
 import sys
-from typing import Optional
+from pathlib import Path
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
@@ -13,13 +15,11 @@ from yonokuni import (
     YonokuniEnv,
     YonokuniNet,
     YonokuniNetConfig,
-    decode_action,
-    encode_action,
-    enumerate_legal_actions,
     make_mcts_policy_from_model,
     RandomPolicy,
 )
-from yonokuni.core import PlayerColor, Team
+from yonokuni.core import decode_action
+from yonokuni.core.state import Team, GameResult
 
 
 def load_model(checkpoint_path: str, device: torch.device) -> YonokuniNet:
@@ -59,7 +59,7 @@ def format_board(env: YonokuniEnv) -> str:
         return "\n".join(rows)
 
 
-def list_human_moves(env: YonokuniEnv, legal_mask: np.ndarray) -> list:
+def list_human_moves(env: YonokuniEnv, legal_mask: np.ndarray) -> List:
     indices = np.flatnonzero(legal_mask)
     moves = []
     for idx in indices:
@@ -70,8 +70,8 @@ def list_human_moves(env: YonokuniEnv, legal_mask: np.ndarray) -> list:
 
 def prompt_human_move(env: YonokuniEnv, legal_mask: np.ndarray) -> int:
     moves = list_human_moves(env, legal_mask)
-    print("合法手:")
     move_indices = {entry[0] for entry in moves}
+    print("合法手:")
     for idx, action in moves:
         fr, fc, tr, tc = action.from_row, action.from_col, action.to_row, action.to_col
         print(f"  {idx}: ({fr},{fc}) -> ({tr},{tc})")
@@ -89,17 +89,46 @@ def prompt_human_move(env: YonokuniEnv, legal_mask: np.ndarray) -> int:
         print("不正な index です。もう一度。")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Play Yonokuni in the console against AI.")
-    parser.add_argument("--checkpoint", help="Path to model checkpoint", default=None)
-    parser.add_argument("--human-team", choices=["A", "B"], default="A")
-    parser.add_argument("--mcts-simulations", type=int, default=64)
-    parser.add_argument("--dirichlet-alpha", type=float, default=0.0)
-    parser.add_argument("--temperature", type=float, default=0.8)
-    parser.add_argument("--max-ply", type=int, default=400)
-    args = parser.parse_args()
+def save_log(log: Dict, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(log, ensure_ascii=False, indent=2))
+    print(f"ログを {path} に保存しました。")
 
+
+def replay_logged_game(log_path: Path, *, verbose: bool = True) -> Dict[str, object]:
+    data = json.loads(log_path.read_text())
+    moves = data.get("moves", [])
+    env = YonokuniEnv()
+    env.reset()
+    if verbose:
+        print("ログリプレイを開始します。")
+        print(format_board(env))
+    for entry in moves:
+        idx = entry["action_index"]
+        action = decode_action(idx)
+        env.step(idx)
+        if verbose:
+            actor = entry.get("actor", "unknown")
+            team = entry.get("team", "?")
+            print(
+                f"{actor} (Team {team}) の手: ({action.from_row},{action.from_col}) -> ({action.to_row},{action.to_col})"
+            )
+            print(format_board(env))
+    result = env._state.result
+    summary = {
+        "result": result.value if isinstance(result, GameResult) else str(result),
+        "moves": len(moves),
+        "board": env._state.board.tolist(),
+    }
+    if verbose:
+        print("リプレイ終了。")
+        print(f"結果: {summary['result']}")
+    return summary
+
+
+def play_interactive(args: argparse.Namespace) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    log_records: List[Dict] = []
 
     if args.checkpoint:
         model = load_model(args.checkpoint, device)
@@ -115,11 +144,12 @@ def main() -> None:
         print("チェックポイント未指定のため、AI はランダム政策でプレイします。")
 
     env = YonokuniEnv()
-    env._state.max_ply = args.max_ply  # ensure truncation uses specified limit
+    env._state.max_ply = args.max_ply
     obs, info = env.reset()
     human_team = Team.A if args.human_team == "A" else Team.B
 
     terminated = False
+    move_index = 0
     while not terminated:
         state_snapshot = env._state.copy()
         legal_mask = info["legal_action_mask"]
@@ -131,14 +161,29 @@ def main() -> None:
 
         if team == human_team:
             action_index = prompt_human_move(env, legal_mask)
+            actor = "human"
         else:
             action_index = select_ai_action(policy_ai, state_snapshot, legal_mask, args.temperature)
+            actor = "ai"
             action = decode_action(action_index)
             print(
                 f"AI ({team.value}) の手: ({action.from_row},{action.from_col}) -> ({action.to_row},{action.to_col})"
             )
 
+        action = decode_action(action_index)
+        log_records.append(
+            {
+                "move_index": move_index,
+                "actor": actor,
+                "team": team.value,
+                "action_index": int(action_index),
+                "from": [action.from_row, action.from_col],
+                "to": [action.to_row, action.to_col],
+            }
+        )
+
         obs, reward, terminated, truncated, info = env.step(action_index)
+        move_index += 1
         if truncated:
             terminated = True
 
@@ -151,6 +196,37 @@ def main() -> None:
         print("Team B の勝利！")
     else:
         print("引き分け。")
+
+    if args.log_file:
+        metadata = {
+            "human_team": args.human_team,
+            "checkpoint": args.checkpoint,
+            "mcts_simulations": args.mcts_simulations,
+            "temperature": args.temperature,
+            "result": result.value if isinstance(result, GameResult) else str(result),
+        }
+        log_data = {"metadata": metadata, "moves": log_records}
+        save_log(log_data, Path(args.log_file))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Play Yonokuni in the console against AI.")
+    parser.add_argument("--checkpoint", help="Path to model checkpoint", default=None)
+    parser.add_argument("--human-team", choices=["A", "B"], default="A")
+    parser.add_argument("--mcts-simulations", type=int, default=64)
+    parser.add_argument("--dirichlet-alpha", type=float, default=0.0)
+    parser.add_argument("--temperature", type=float, default=0.8)
+    parser.add_argument("--max-ply", type=int, default=400)
+    parser.add_argument("--log-file", type=str)
+    parser.add_argument("--replay-log", type=str, help="Replay a logged game and exit")
+    parser.add_argument("--replay-quiet", action="store_true")
+    args = parser.parse_args()
+
+    if args.replay_log:
+        replay_logged_game(Path(args.replay_log), verbose=not args.replay_quiet)
+        return
+
+    play_interactive(args)
 
 
 if __name__ == "__main__":
