@@ -7,6 +7,11 @@ from pathlib import Path
 
 import yaml
 
+try:
+    from tqdm.auto import trange
+except ImportError:
+    trange = range
+
 from yonokuni.mcts import MCTSConfig
 from yonokuni.orchestration import SelfPlayTrainer, SelfPlayTrainerConfig
 from yonokuni.training import TrainingConfig
@@ -74,7 +79,8 @@ def main() -> None:
 
     trainer = SelfPlayTrainer(config)
     try:
-        for i in range(args.iterations):
+        iterator = trange(args.iterations, desc="Iterations") if trange is not range else range(args.iterations)
+        for i in iterator:
             result = trainer.iteration()
             print(json.dumps({"iteration": i + 1, **result}, indent=2))
     finally:
