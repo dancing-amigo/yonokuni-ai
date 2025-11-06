@@ -7,21 +7,40 @@ Yonokuni AI は、4 色チーム戦の完全情報ボードゲームに AlphaZer
 - TypeScript 製ゲームエンジン（UI/サーバ）と Python/Gym 学習環境を同一仕様で実装・検証し、実運用と学習パイプラインの整合性を確保する。
 - ルール固有の取り方（同色サンド・包囲取り）や死に駒処理、中央 4 マス勝利条件などを厳密に再現し、高度なデータ拡張・評価基盤を備えた学習パイプラインを構築する。
 
-## コア要素
-- **TypeScript ゲームエンジン**：UI/サーバから利用される公式ルール実装。移動判定→捕獲→死に駒反映→勝敗判定→手番交代の順序を固定し、合法手ゼロ時のスキップにも対応。
-- **Python/Gym 環境**：TS エンジンと同仕様の環境を Gym API で公開し、観測 8 チャンネル + 補助ベクトル、1,792 次元の行動空間を提供。ゴールデンテストで TS との同値性を自動検証。
-- **AlphaZero 学習パイプライン**：ResNet ベースの方策・価値ネットワーク、PUCT MCTS、自己対戦データ収集、リプレイバッファ学習、モデルゲーティング、評価基盤を含む統合ワークフロー。
+## クイックセットアップ
 
-## リポジトリ構成（予定）
-- `ts/`：TypeScript 実装（ゲームエンジン・テスト）。
-- `python/`：Gym 環境、学習スクリプト、MCTS 実装。
-- `docs/` またはルート：本ドキュメント、アーキテクチャ、プラン。
-- `tests/`：TS/Python 双方のユニットテストおよび同値性テスト。
+1. 仮想環境を作成し、依存をインストールします。
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   pip install -e .
+   ```
 
-## 現状と今後
-1. TypeScript エンジンのルール更新（同色サンド、取り順序、スキップなど）と単体テスト整備。
-2. Python/Gym 環境の構築とゴールデンテストによる仕様一致確認。
-3. AlphaZero パイプライン（MCTS・自己対戦・学習・ゲーティング）の実装と運用設計。
-4. ルールベース Bot や旧モデルとの対戦評価、ダッシュボード化、推論高速化。
+2. 学習イテレーションを実行します。
+   ```bash
+   .venv/bin/python scripts/run_iteration.py        --config configs/self_play.yaml        --iterations 5        --episodes 32        --train-steps 64
+   ```
 
-詳細な実装タスクは `PLAN.md`、アーキテクチャの高レベル整理は `ARCHITECTURE.md` を参照してください。
+3. TensorBoard でメトリクスを確認します。
+   ```bash
+   .venv/bin/tensorboard --logdir logs/run_iteration
+   ```
+   ブラウザで http://localhost:6006 を開くと学習の進捗が見られます。
+
+## プロジェクトの中身を知りたいとき
+
+詳しい実装ドキュメントは `AGENT.md` および `.agent/docs/` 以下にまとめています。
+- 全体アーキテクチャ: `.agent/docs/architecture.md`
+- 学習パイプライン: `.agent/docs/training_pipeline.md`
+- CLI ツール: `.agent/docs/cli_tools.md`
+
+## 主なディレクトリ
+- `yonokuni/`: Python 実装（ゲームルール、Env、MCTS、Self-Play、モデル、オーケストレーションなど）
+- `scripts/`: 学習・評価・プレイ用 CLI スクリプト
+- `tests/`: ユニットテスト
+- `.agent/docs/`: 実装ドキュメント
+
+## ライセンス
+MIT License
