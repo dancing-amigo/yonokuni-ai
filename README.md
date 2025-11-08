@@ -29,6 +29,57 @@ Yonokuni AI は、4 色チーム戦の完全情報ボードゲームに AlphaZer
    ```
    ブラウザで http://localhost:6006 を開くと学習の進捗が見られます。
 
+## 長時間トレーニング (200 iteration)
+
+`configs/self_play_long.yaml` は GPU 前提で 200 iteration を一気に回すための設定です。
+
+- 1 iteration あたり 64 ゲーム生成 / 256 ステップ学習
+- 20 iteration ごとに checkpoint と評価 (log: `logs/long_run`, checkpoints: `checkpoints/long_run`)
+- MCTS シミュレーション 128 回、バッファ 150 万局面
+
+実行例:
+
+```bash
+.venv/bin/python scripts/run_iteration.py \
+  --config configs/self_play_long.yaml \
+  --iterations 200 \
+  --resume-from checkpoints/long_run/checkpoint_00020.pt  # 中断・再開したい場合
+```
+
+20 iteration ごとに評価する簡易ループ:
+
+```bash
+for step in $(seq 20 20 200); do
+  ckpt=checkpoints/long_run/checkpoint_$(printf "%05d" "$step").pt
+  [ -f "$ckpt" ] || continue
+  .venv/bin/python scripts/evaluate_model.py "$ckpt" \
+    --episodes 40 \
+    --mcts-simulations 128 \
+    --baseline rule \
+    > logs/eval_long_run_step${step}.json
+done
+```
+
+GPU・CPU の空き状況によって `self_play_workers` や `episodes_per_iteration` を下げてください。
+
+## AI と対戦する
+
+学習済みチェックポイントを使ってコンソール上で AI と対戦できます。
+
+```bash
+.venv/bin/python scripts/play_vs_ai.py \
+  --checkpoint checkpoints/run_iteration/checkpoint_00010.pt \
+  --human-team A \
+  --mcts-simulations 128 \
+  --temperature 0.6 \
+  --log-file logs/play/session001.json
+```
+
+- `--checkpoint` を省略するとランダム方策が相手になります。
+- `--human-team` は先後（Team A = 赤/黄, Team B = 青/緑）を選択。
+- `--log-file` を指定すると対局ログ(JSON)が保存され、`--replay-log path.json` で後から棋譜を再生できます（`--replay-quiet` で盤面表示を抑制）。
+- `--max-ply` で最大手数、`--temperature` で AI の多様性を調整できます。
+
 ## プロジェクトの中身を知りたいとき
 
 詳しい実装ドキュメントは `AGENT.md` および `.agent/docs/` 以下にまとめています。

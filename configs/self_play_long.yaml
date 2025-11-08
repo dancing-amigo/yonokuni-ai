@@ -1,0 +1,25 @@
+episodes_per_iteration: 64
+training_steps_per_iteration: 256
+buffer_capacity: 1500000
+temperature: 1.0
+temperature_schedule:
+  - [0, 1.0]
+  - [80, 0.8]
+  - [140, 0.6]
+  - [180, 0.4]
+self_play_workers: 4
+validation_sample_size: 128
+checkpoint_interval: 20
+log_dir: logs/long_run
+checkpoint_dir: checkpoints/long_run
+mcts:
+  num_simulations: 128
+  dirichlet_alpha: 0.03
+  dirichlet_fraction: 0.25
+training:
+  batch_size: 256
+  apply_symmetry: true
+  policy_weight: 1.0
+  value_weight: 1.0
+  l2_weight: 0.0001
+  grad_clip: 1.0

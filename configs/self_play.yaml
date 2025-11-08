@@ -10,6 +10,7 @@ self_play_workers: 2
 validation_sample_size: 32
 checkpoint_interval: 10
 log_dir: logs/run_iteration
+checkpoint_dir: checkpoints/run_iteration
 mcts:
   num_simulations: 64
   dirichlet_alpha: 0.0
