@@ -29,6 +29,37 @@ Yonokuni AI は、4 色チーム戦の完全情報ボードゲームに AlphaZer
    ```
    ブラウザで http://localhost:6006 を開くと学習の進捗が見られます。
 
+## Windows + GPU 環境
+
+Windows 10 / RTX 5090 のような GPU マシンでも同じコードで動作します（Python 3.11.x も pyproject の `>=3.10,<3.12` に含まれるのでサポート対象です）。PowerShell 例:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+python -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+# 先に CUDA 版の torch を固定
+pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.0+cu121 torchvision==0.17.0+cu121 --no-cache-dir
+pip install -r requirements.txt
+pip install -e .
+```
+
+GPU で学習する場合は `configs/self_play_windows_gpu.yaml` を指定すると、`training.device=cuda` や高バッチサイズがセットされた状態で `scripts/run_iteration.py` を実行できます:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/run_iteration.py `
+  --config configs/self_play_windows_gpu.yaml `
+  --iterations 200
+```
+
+### GPU 待機時間の監視
+
+- `nvidia-smi dmon -s pucm` で GPU 利用率/メモリ/コピー帯域を継続監視。
+- Windows 標準の「リソース モニター」や `Get-Counter '\Processor(_Total)\% Processor Time'` で CPU 飽和をチェック。
+- TensorBoard (`.\.venv\Scripts\tensorboard.exe --logdir logs/windows_gpu --bind_all`) を併用して学習待ち時間を可視化。
+
+Windows GPU 最適化の詳細は `docs/windows_gpu_training.md` を参照してください。
+
 ## 長時間トレーニング (200 iteration)
 
 `configs/self_play_long.yaml` は GPU 前提で 200 iteration を一気に回すための設定です。
