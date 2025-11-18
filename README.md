@@ -39,7 +39,7 @@ python -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 # 先に CUDA 版の torch を固定
-pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.0+cu121 torchvision==0.17.0+cu121 --no-cache-dir
+pip install torch --index-url https://download.pytorch.org/whl/cu128
 pip install -r requirements.txt
 pip install -e .
 ```

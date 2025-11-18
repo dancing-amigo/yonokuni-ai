@@ -22,8 +22,8 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 python -3.10 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install --extra-index-url https://download.pytorch.org/whl/cu121 torch==2.2.0+cu121 torchvision==0.17.0+cu121 --no-cache-dir
-pip install -r requirements.txt  # ここでは CPU 版 torch が入らないよう先に GPU 版を固定
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+pip install -r requirements.txt  # requirements.txtにtorchがないことを確認してから
 pip install -e .
 ```
 
