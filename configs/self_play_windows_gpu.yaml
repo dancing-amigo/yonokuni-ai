@@ -6,13 +6,13 @@ temperature_schedule:
   - [60, 0.7]
   - [120, 0.5]
   - [160, 0.35]
-self_play_workers: 12
+self_play_workers: 4
 validation_sample_size: 256
 checkpoint_interval: 10
 log_dir: logs/windows_gpu
 checkpoint_dir: checkpoints/windows_gpu
 mcts:
-  num_simulations: 160
+  num_simulations: 32
   dirichlet_alpha: 0.03
   dirichlet_fraction: 0.25
 training:
