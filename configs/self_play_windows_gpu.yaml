@@ -32,8 +32,8 @@ early_termination:
   resign_disable_ratio: 0.1   # 10%のゲームで投了を無効化
 
   # 停滞ドロー: 死亡者が増えない状態が続いたら終了
-  enable_stagnation: true
-  stagnation_no_death: 50
+  enable_stagnation: false
+  stagnation_no_death: 100
 
   # 価値帯ドロー: ほぼイーブンが続いたら終了
   enable_value_draw: false
