@@ -42,7 +42,7 @@ def main() -> None:
     if args.config:
         cfg_path = Path(args.config)
         if cfg_path.exists():
-            cfg = yaml.safe_load(cfg_path.read_text()) or {}
+            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     episodes = args.episodes if args.episodes is not None else cfg.get("episodes_per_iteration", 8)
     train_steps = args.train_steps if args.train_steps is not None else cfg.get("training_steps_per_iteration", 16)
     log_dir = args.log_dir if args.log_dir is not None else cfg.get("log_dir")

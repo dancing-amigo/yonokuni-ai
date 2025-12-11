@@ -30,7 +30,7 @@ def load_yaml_config(path_str: str) -> Dict:
     path = Path(path_str)
     if not path.exists():
         return {}
-    return yaml.safe_load(path.read_text()) or {}
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
 def _make_env_factory(env_max_ply: Optional[int]) -> YonokuniEnv:
