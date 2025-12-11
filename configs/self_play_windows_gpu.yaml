@@ -36,15 +36,15 @@ early_termination:
   stagnation_no_death: 50
 
   # 価値帯ドロー: ほぼイーブンが続いたら終了
-  enable_value_draw: true
+  enable_value_draw: false
   value_draw_band: 0.05
   value_draw_consecutive: 20
 
   # 反復ドロー: 同一局面が繰り返されたら終了
-  enable_repetition: true
+  enable_repetition: false
   repetition_count: 3
 
   # ソフトmax_ply: 残り手数が少なく価値が拮抗なら早めにドロー
-  enable_soft_maxply: true
+  enable_soft_maxply: false
   soft_value_band: 0.1
   soft_remaining_moves: 20
