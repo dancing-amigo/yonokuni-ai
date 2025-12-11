@@ -14,11 +14,12 @@ import argparse
 import json
 import time
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 import yaml
 
 from yonokuni.mcts import MCTSConfig
+from yonokuni.env import YonokuniEnv
 from yonokuni.orchestration import SelfPlayTrainer, SelfPlayTrainerConfig
 from yonokuni.training import TrainingConfig
 from yonokuni.validation import validate_buffer_sample
@@ -29,6 +30,16 @@ def load_yaml_config(path_str: str) -> Dict:
     if not path.exists():
         return {}
     return yaml.safe_load(path.read_text()) or {}
+
+
+def _make_env_factory(env_max_ply: Optional[int]) -> YonokuniEnv:
+    if env_max_ply is None:
+        return YonokuniEnv  # type: ignore[return-value]
+
+    def factory() -> YonokuniEnv:
+        return YonokuniEnv(max_ply=env_max_ply)
+
+    return factory  # type: ignore[return-value]
 
 
 def build_config(args: argparse.Namespace, cfg: Dict) -> SelfPlayTrainerConfig:
@@ -68,6 +79,7 @@ def build_config(args: argparse.Namespace, cfg: Dict) -> SelfPlayTrainerConfig:
         self_play_workers=workers,
         validation_sample_size=validation_sample_size,
         mcts_config=mcts,
+        env_factory=_make_env_factory(args.env_max_ply),
         wandb_project=args.wandb_project or cfg.get("wandb_project"),
         wandb_run_name=args.wandb_run_name or cfg.get("wandb_run_name"),
         wandb_entity=args.wandb_entity or cfg.get("wandb_entity"),
@@ -88,6 +100,7 @@ def main() -> None:
     parser.add_argument("--temperature", type=float)
     parser.add_argument("--self-play-workers", type=int)
     parser.add_argument("--validation-sample-size", type=int)
+    parser.add_argument("--env-max-ply", type=int, help="Override YonokuniEnv max_ply (default 400)")
     parser.add_argument("--wandb-project")
     parser.add_argument("--wandb-run-name")
     parser.add_argument("--wandb-entity")
