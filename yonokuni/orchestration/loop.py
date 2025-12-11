@@ -47,6 +47,8 @@ class SelfPlayTrainerConfig:
     wandb_run_name: Optional[str] = None
     wandb_entity: Optional[str] = None
     early_termination: EarlyTerminationConfig = field(default_factory=EarlyTerminationConfig)
+    step_penalty: float = 0.0
+    endgame_start: bool = False  # if True, start from a late-game randomized setup
 
 
 class SelfPlayTrainer:
@@ -100,6 +102,8 @@ class SelfPlayTrainer:
             seed=config.seed,
             evaluator=self.evaluator,
             early_termination=config.early_termination,
+            step_penalty=config.step_penalty,
+            endgame_start=config.endgame_start,
         )
 
         self.writer: Optional[SummaryWriter] = None

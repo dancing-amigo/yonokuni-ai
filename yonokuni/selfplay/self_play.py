@@ -136,6 +136,44 @@ class EarlyTerminationConfig:
     soft_remaining_moves: int = 20  # if within band and remaining moves below this, declare draw
 
 
+def _init_endgame_state(state: GameState, *, rng: np.random.Generator) -> GameState:
+    """Mutate a GameState to a late-game random setup with 4 pieces per color."""
+    board = state.board
+    board[:] = 0
+    # choose 4 positions per color (16 total), prefer central area for quicker finishes
+    centers = [(r, c) for r in range(2, 6) for c in range(2, 6)]
+    outer = [(r, c) for r in range(8) for c in range(8) if (r, c) not in centers]
+    positions = []
+    positions += rng.choice(len(centers), size=min(len(centers), 8), replace=False).tolist()
+    # ensure enough positions: take from outer if needed
+    remaining = 16 - len(positions)
+    if remaining > 0:
+        positions += [len(centers) + idx for idx in rng.choice(len(outer), size=remaining, replace=False).tolist()]
+    coords: List[Tuple[int, int]] = []
+    for idx in positions:
+        if idx < len(centers):
+            coords.append(centers[idx])
+        else:
+            coords.append(outer[idx - len(centers)])
+
+    colors = [PlayerColor.RED, PlayerColor.BLUE, PlayerColor.YELLOW, PlayerColor.GREEN]
+    coord_iter = iter(coords)
+    for color in colors:
+        for _ in range(4):
+            r, c = next(coord_iter)
+            board[r, c] = int(color)
+
+    state.board = board
+    state.dead_mask[:] = False
+    state.dead_players[:] = False
+    state.captured_counts[:] = 0
+    state.current_player = rng.choice(list(PlayerColor))
+    state.ply_count = 0
+    state.result = GameResult.ONGOING
+    state.last_action = None
+    return state
+
+
 class SelfPlayManager:
     def __init__(
         self,
@@ -148,6 +186,8 @@ class SelfPlayManager:
         seed: Optional[int] = None,
         evaluator: Optional[YonokuniEvaluator] = None,
         early_termination: EarlyTerminationConfig = EarlyTerminationConfig(),
+        step_penalty: float = 0.0,
+        endgame_start: bool = False,
     ) -> None:
         self.buffer = buffer
         self.policy = policy or RandomPolicy()
@@ -157,6 +197,8 @@ class SelfPlayManager:
         self.temperature_schedule = self._normalize_schedule(temperature_schedule, default=temperature)
         self.evaluator = evaluator
         self.early_termination = early_termination
+        self.step_penalty = float(step_penalty)
+        self.endgame_start = endgame_start
 
         self.value_fn: Optional[Callable[[GameState], float]] = None
         if self.evaluator:
@@ -246,6 +288,11 @@ class SelfPlayManager:
         rng = rng or self.rng
         env = self.env_factory()
         obs, info = env.reset()
+
+        if self.endgame_start:
+            env._state = _init_endgame_state(env._state, rng=rng)
+            obs = env._build_observation()
+            info = env._build_info()
 
         trajectory: List[TrajectoryStep] = []
 
@@ -380,16 +427,17 @@ class SelfPlayManager:
         final_result = env._state.result
         center_team = self._center_team(env._state)
 
+        move_count = len(trajectory)
         for step, value in zip(trajectory, final_values):
+            adjusted_value = value - (self.step_penalty * move_count) if self.step_penalty != 0.0 else value
             self.buffer.add(
                 ReplaySample(
                     board=step.board,
                     aux=step.aux,
                     policy=step.policy,
-                    value=value,
+                    value=adjusted_value,
                 )
             )
-        move_count = len(trajectory)
         env.close()
         game_stats = {
             "center_team": center_team,

@@ -69,6 +69,8 @@ def build_config(args: argparse.Namespace, cfg: Dict) -> SelfPlayTrainerConfig:
     training = TrainingConfig(**training_cfg)
     early_stop_cfg = cfg.get("early_termination", {})
     early_stop = EarlyTerminationConfig(**early_stop_cfg)
+    step_penalty = float(cfg.get("step_penalty", 0.0))
+    endgame_start = bool(cfg.get("endgame_start", False))
 
     return SelfPlayTrainerConfig(
         episodes_per_iteration=episodes,
@@ -84,6 +86,8 @@ def build_config(args: argparse.Namespace, cfg: Dict) -> SelfPlayTrainerConfig:
         mcts_config=mcts,
         env_factory=_make_env_factory(args.env_max_ply),
         early_termination=early_stop,
+        step_penalty=step_penalty,
+        endgame_start=endgame_start,
         wandb_project=args.wandb_project or cfg.get("wandb_project"),
         wandb_run_name=args.wandb_run_name or cfg.get("wandb_run_name"),
         wandb_entity=args.wandb_entity or cfg.get("wandb_entity"),
