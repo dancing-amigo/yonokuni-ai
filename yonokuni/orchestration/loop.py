@@ -9,8 +9,13 @@ import torch
 
 from yonokuni import Transform, YonokuniEnv
 from yonokuni.mcts import MCTSConfig
-from yonokuni.models import YonokuniNet, YonokuniNetConfig
-from yonokuni.selfplay import ReplayBuffer, SelfPlayManager, make_mcts_policy_from_model
+from yonokuni.models import YonokuniEvaluator, YonokuniNet, YonokuniNetConfig
+from yonokuni.selfplay import (
+    EarlyTerminationConfig,
+    ReplayBuffer,
+    SelfPlayManager,
+    make_mcts_policy_from_model,
+)
 from yonokuni.validation import validate_buffer_sample
 from yonokuni.training import Trainer, TrainingConfig
 
@@ -41,6 +46,7 @@ class SelfPlayTrainerConfig:
     wandb_project: Optional[str] = None
     wandb_run_name: Optional[str] = None
     wandb_entity: Optional[str] = None
+    early_termination: EarlyTerminationConfig = field(default_factory=EarlyTerminationConfig)
 
 
 class SelfPlayTrainer:
@@ -70,6 +76,8 @@ class SelfPlayTrainer:
         self.training_config = config.training_config
         self.training_config.device = self.device
 
+        self.evaluator = YonokuniEvaluator(self.model, device=self.device, dtype=self.training_config.dtype)
+
         self.trainer = Trainer(
             self.model,
             self.optimizer,
@@ -90,6 +98,8 @@ class SelfPlayTrainer:
             temperature=config.temperature,
             temperature_schedule=config.temperature_schedule,
             seed=config.seed,
+            evaluator=self.evaluator,
+            early_termination=config.early_termination,
         )
 
         self.writer: Optional[SummaryWriter] = None

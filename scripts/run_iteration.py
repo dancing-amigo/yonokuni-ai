@@ -14,6 +14,7 @@ except ImportError:
 
 from yonokuni.mcts import MCTSConfig
 from yonokuni.orchestration import SelfPlayTrainer, SelfPlayTrainerConfig
+from yonokuni.selfplay import EarlyTerminationConfig
 from yonokuni.training import TrainingConfig
 
 
@@ -62,6 +63,8 @@ def main() -> None:
     mcts = MCTSConfig(**mcts_cfg)
     training_cfg = cfg.get("training", {})
     training = TrainingConfig(**training_cfg)
+    early_stop_cfg = cfg.get("early_termination", {})
+    early_stop = EarlyTerminationConfig(**early_stop_cfg)
 
     config = SelfPlayTrainerConfig(
         episodes_per_iteration=episodes,
@@ -75,6 +78,7 @@ def main() -> None:
         self_play_workers=workers,
         validation_sample_size=validation_sample_size,
         mcts_config=mcts,
+        early_termination=early_stop,
         wandb_project=args.wandb_project or cfg.get("wandb_project"),
         wandb_run_name=args.wandb_run_name or cfg.get("wandb_run_name"),
         wandb_entity=args.wandb_entity or cfg.get("wandb_entity"),

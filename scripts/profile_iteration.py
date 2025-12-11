@@ -18,9 +18,10 @@ from typing import Dict, Optional
 
 import yaml
 
-from yonokuni.mcts import MCTSConfig
 from yonokuni.env import YonokuniEnv
+from yonokuni.mcts import MCTSConfig
 from yonokuni.orchestration import SelfPlayTrainer, SelfPlayTrainerConfig
+from yonokuni.selfplay import EarlyTerminationConfig
 from yonokuni.training import TrainingConfig
 from yonokuni.validation import validate_buffer_sample
 
@@ -66,6 +67,8 @@ def build_config(args: argparse.Namespace, cfg: Dict) -> SelfPlayTrainerConfig:
 
     training_cfg = cfg.get("training", {})
     training = TrainingConfig(**training_cfg)
+    early_stop_cfg = cfg.get("early_termination", {})
+    early_stop = EarlyTerminationConfig(**early_stop_cfg)
 
     return SelfPlayTrainerConfig(
         episodes_per_iteration=episodes,
@@ -80,6 +83,7 @@ def build_config(args: argparse.Namespace, cfg: Dict) -> SelfPlayTrainerConfig:
         validation_sample_size=validation_sample_size,
         mcts_config=mcts,
         env_factory=_make_env_factory(args.env_max_ply),
+        early_termination=early_stop,
         wandb_project=args.wandb_project or cfg.get("wandb_project"),
         wandb_run_name=args.wandb_run_name or cfg.get("wandb_run_name"),
         wandb_entity=args.wandb_entity or cfg.get("wandb_entity"),

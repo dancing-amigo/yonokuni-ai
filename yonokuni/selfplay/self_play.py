@@ -8,7 +8,7 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 
 from yonokuni.env import YonokuniEnv
-from yonokuni.core import GameState, PlayerColor, GameResult
+from yonokuni.core import GameResult, GameState, PlayerColor
 from yonokuni.mcts import MCTS, MCTSConfig
 from yonokuni.models import YonokuniEvaluator
 from yonokuni.selfplay.replay_buffer import ReplayBuffer, ReplaySample
@@ -113,6 +113,29 @@ class TrajectoryStep:
     player: PlayerColor
 
 
+@dataclass
+class EarlyTerminationConfig:
+    enable_resign: bool = False
+    resign_threshold: float = 0.9
+    resign_min_moves: int = 60
+    resign_consecutive: int = 8
+    resign_disable_ratio: float = 0.0  # fraction of games to ignore resign (0.0-1.0)
+
+    enable_stagnation: bool = False
+    stagnation_no_death: int = 50  # consecutive moves without a new death to trigger draw
+
+    enable_value_draw: bool = False
+    value_draw_band: float = 0.05
+    value_draw_consecutive: int = 20
+
+    enable_repetition: bool = False
+    repetition_count: int = 3  # repetitions to declare draw
+
+    enable_soft_maxply: bool = False
+    soft_value_band: float = 0.1  # near-even value band
+    soft_remaining_moves: int = 20  # if within band and remaining moves below this, declare draw
+
+
 class SelfPlayManager:
     def __init__(
         self,
@@ -123,6 +146,8 @@ class SelfPlayManager:
         temperature: float = 1.0,
         temperature_schedule: Optional[Sequence[Tuple[int, float]]] = None,
         seed: Optional[int] = None,
+        evaluator: Optional[YonokuniEvaluator] = None,
+        early_termination: EarlyTerminationConfig = EarlyTerminationConfig(),
     ) -> None:
         self.buffer = buffer
         self.policy = policy or RandomPolicy()
@@ -130,6 +155,12 @@ class SelfPlayManager:
         self.temperature = temperature
         self.rng = np.random.default_rng(seed)
         self.temperature_schedule = self._normalize_schedule(temperature_schedule, default=temperature)
+        self.evaluator = evaluator
+        self.early_termination = early_termination
+
+        self.value_fn: Optional[Callable[[GameState], float]] = None
+        if self.evaluator:
+            self.value_fn = lambda state: self.evaluator.predict(state)[1]
 
     def _normalize_schedule(
         self,
@@ -222,6 +253,13 @@ class SelfPlayManager:
         final_reward = 0.0
         move_index = 0
         death_turns = [-1, -1, -1, -1]
+        last_dead_count = int(np.sum(env._state.dead_players))
+
+        repetition_counts: Dict[bytes, int] = {}
+        resign_streak = 0
+        value_draw_streak = 0
+        stagnation_streak = 0
+        early_reason: Optional[str] = None
 
         while not terminated:
             board = obs["board"]
@@ -260,6 +298,80 @@ class SelfPlayManager:
                 if dead_after[idx] and not dead_before[idx] and death_turns[idx] < 0:
                     death_turns[idx] = move_index
 
+            # Early termination checks (post-step)
+            early_cfg = self.early_termination
+            value_pred: Optional[float] = None
+            if self.value_fn and (
+                early_cfg.enable_resign or early_cfg.enable_value_draw or early_cfg.enable_soft_maxply
+            ):
+                value_pred = float(self.value_fn(env._state))
+
+            # Repetition draw
+            if early_cfg.enable_repetition:
+                board_key = env._state.board.tobytes()
+                repetition_counts[board_key] = repetition_counts.get(board_key, 0) + 1
+                if repetition_counts[board_key] >= early_cfg.repetition_count:
+                    env._state.result = GameResult.DRAW
+                    final_reward = 0.0
+                    terminated = True
+                    early_reason = "repetition"
+
+            # Stagnation draw (no new deaths)
+            if not terminated and early_cfg.enable_stagnation:
+                dead_count = int(np.sum(env._state.dead_players))
+                if dead_count == last_dead_count:
+                    stagnation_streak += 1
+                else:
+                    stagnation_streak = 0
+                last_dead_count = dead_count
+                if stagnation_streak >= early_cfg.stagnation_no_death:
+                    env._state.result = GameResult.DRAW
+                    final_reward = 0.0
+                    terminated = True
+                    early_reason = "stagnation"
+
+            # Value-based draw (near-even for long)
+            if not terminated and early_cfg.enable_value_draw and value_pred is not None:
+                if abs(value_pred) < early_cfg.value_draw_band:
+                    value_draw_streak += 1
+                else:
+                    value_draw_streak = 0
+                if value_draw_streak >= early_cfg.value_draw_consecutive:
+                    env._state.result = GameResult.DRAW
+                    final_reward = 0.0
+                    terminated = True
+                    early_reason = "value_draw"
+
+            # Resign if clearly losing for consecutive moves
+            if not terminated and early_cfg.enable_resign and value_pred is not None:
+                if move_index >= early_cfg.resign_min_moves and abs(value_pred) >= early_cfg.resign_threshold:
+                    resign_streak += 1
+                else:
+                    resign_streak = 0
+                if early_cfg.resign_disable_ratio > 0.0:
+                    if rng.random() < early_cfg.resign_disable_ratio:
+                        resign_streak = 0
+                if resign_streak >= early_cfg.resign_consecutive:
+                    if value_pred > 0:
+                        env._state.result = GameResult.TEAM_A_WIN
+                        final_reward = 1.0
+                    else:
+                        env._state.result = GameResult.TEAM_B_WIN
+                        final_reward = -1.0
+                    terminated = True
+                    early_reason = "resign"
+
+            # Soft max-ply: near-even and close to cap -> draw
+            if not terminated and early_cfg.enable_soft_maxply and value_pred is not None:
+                remaining = getattr(env, "_max_ply", None)
+                if remaining is not None:
+                    remaining = env._max_ply - (move_index + 1)
+                    if remaining <= early_cfg.soft_remaining_moves and abs(value_pred) < early_cfg.soft_value_band:
+                        env._state.result = GameResult.DRAW
+                        final_reward = 0.0
+                        terminated = True
+                        early_reason = "soft_max_ply"
+
             move_index += 1
             if truncated:
                 terminated = True
@@ -282,6 +394,7 @@ class SelfPlayManager:
         game_stats = {
             "center_team": center_team,
             "death_turns": death_turns,
+            "early_termination": early_reason,
         }
         return final_result, move_count, game_stats
 
