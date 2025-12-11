@@ -23,3 +23,28 @@ training:
   l2_weight: 0.00005
   grad_clip: 1.0
   device: cuda
+early_termination:
+  # 投了: 価値が大きく傾いたら終了（誤判定ケアで一部ゲームは無効化）
+  enable_resign: true
+  resign_threshold: 0.9
+  resign_min_moves: 60
+  resign_consecutive: 8
+  resign_disable_ratio: 0.1   # 10%のゲームで投了を無効化
+
+  # 停滞ドロー: 死亡者が増えない状態が続いたら終了
+  enable_stagnation: true
+  stagnation_no_death: 50
+
+  # 価値帯ドロー: ほぼイーブンが続いたら終了
+  enable_value_draw: true
+  value_draw_band: 0.05
+  value_draw_consecutive: 20
+
+  # 反復ドロー: 同一局面が繰り返されたら終了
+  enable_repetition: true
+  repetition_count: 3
+
+  # ソフトmax_ply: 残り手数が少なく価値が拮抗なら早めにドロー
+  enable_soft_maxply: true
+  soft_value_band: 0.1
+  soft_remaining_moves: 20
