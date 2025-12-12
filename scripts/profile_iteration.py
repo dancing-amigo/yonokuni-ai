@@ -180,6 +180,17 @@ def main() -> None:
 
             result = {
                 "iteration": iter_index,
+                "effective_config": {
+                    "episodes_per_iteration": config.episodes_per_iteration,
+                    "training_steps_per_iteration": config.training_steps_per_iteration,
+                    "mcts_num_simulations": config.mcts_config.num_simulations,
+                    "env_max_ply": getattr(trainer.self_play.env_factory(), "_max_ply", None),
+                    "step_penalty": getattr(config, "step_penalty", 0.0),
+                    "endgame_start": getattr(config, "endgame_start", False),
+                    "early_termination": vars(getattr(config, "early_termination", None))
+                    if getattr(config, "early_termination", None) is not None
+                    else None,
+                },
                 "buffer_size": buffer_size,
                 "self_play_time_sec": self_play_time,
                 "train_time_sec": train_time,
