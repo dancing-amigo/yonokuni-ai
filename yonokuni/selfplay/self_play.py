@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
@@ -60,7 +60,11 @@ class MCTSPolicy(Policy):
     ) -> None:
         self._config = deepcopy(config) if config else MCTSConfig()
         self._evaluator = evaluator
-        self.mcts = MCTS(evaluator, config=self._config, rng=rng or np.random.default_rng())
+        self.mcts = MCTS(
+            evaluator,
+            config=self._config,
+            rng=rng or np.random.default_rng(),
+        )
 
     def act(self, state: GameState, legal_mask: np.ndarray) -> np.ndarray:
         result = self.mcts.run(state)
@@ -85,7 +89,9 @@ def make_mcts_policy_from_model(
     rng: Optional[np.random.Generator] = None,
 ) -> MCTSPolicy:
     if torch is None:
-        raise RuntimeError("PyTorch is required to use make_mcts_policy_from_model.")
+        raise RuntimeError(
+            "PyTorch is required to use make_mcts_policy_from_model."
+        )
     evaluator = YonokuniEvaluator(model, device=device, dtype=dtype)
 
     def eval_fn(state: GameState) -> Tuple[np.ndarray, float]:
@@ -94,9 +100,15 @@ def make_mcts_policy_from_model(
     return MCTSPolicy(eval_fn, config=config, rng=rng)
 
 
-def select_action(probabilities: np.ndarray, temperature: float, rng: np.random.Generator) -> int:
+def select_action(
+    probabilities: np.ndarray,
+    temperature: float,
+    rng: np.random.Generator,
+) -> int:
     if probabilities.sum() == 0:
-        raise ValueError("Policy produced zero probability over legal actions.")
+        raise ValueError(
+            "Policy produced zero probability over legal actions."
+        )
     probs = probabilities.astype(np.float64, copy=True)
     if temperature <= 1e-6:
         return int(np.argmax(probs))
@@ -119,47 +131,98 @@ class EarlyTerminationConfig:
     resign_threshold: float = 0.9
     resign_min_moves: int = 60
     resign_consecutive: int = 8
-    resign_disable_ratio: float = 0.0  # fraction of games to ignore resign (0.0-1.0)
+    # fraction of games to ignore resign (0.0-1.0)
+    resign_disable_ratio: float = 0.0
 
     enable_stagnation: bool = False
-    stagnation_no_death: int = 50  # consecutive moves without a new death to trigger draw
+    # consecutive moves without a new death to trigger draw
+    stagnation_no_death: int = 50
 
     enable_value_draw: bool = False
     value_draw_band: float = 0.05
     value_draw_consecutive: int = 20
 
     enable_repetition: bool = False
-    repetition_count: int = 3  # repetitions to declare draw
+    # repetitions to declare draw
+    repetition_count: int = 3
 
     enable_soft_maxply: bool = False
     soft_value_band: float = 0.1  # near-even value band
-    soft_remaining_moves: int = 20  # if within band and remaining moves below this, declare draw
+    # if within band and remaining moves below this, declare draw
+    soft_remaining_moves: int = 20
 
 
-def _init_endgame_state(state: GameState, *, rng: np.random.Generator) -> GameState:
-    """Mutate a GameState to a late-game random setup with 4 pieces per color."""
+def _init_endgame_state(
+    state: GameState,
+    *,
+    rng: np.random.Generator,
+) -> GameState:
+    """Mutate a GameState to a late-game setup with 4 pieces per color."""
     board = state.board
     board[:] = 0
-    # choose 4 positions per color (16 total), prefer central area for quicker finishes
-    centers = [(r, c) for r in range(2, 6) for c in range(2, 6)]
-    outer = [(r, c) for r in range(8) for c in range(8) if (r, c) not in centers]
-    positions = []
-    positions += rng.choice(len(centers), size=min(len(centers), 8), replace=False).tolist()
-    # ensure enough positions: take from outer if needed
-    remaining = 16 - len(positions)
-    if remaining > 0:
-        positions += [len(centers) + idx for idx in rng.choice(len(outer), size=remaining, replace=False).tolist()]
-    coords: List[Tuple[int, int]] = []
-    for idx in positions:
-        if idx < len(centers):
-            coords.append(centers[idx])
-        else:
-            coords.append(outer[idx - len(centers)])
+    # We want positions that are likely to create centre fights
+    # (and thus faster terminal outcomes).
+    # Force a "centre skirmish" start:
+    # - 3 of 4 centre squares occupied
+    # - both teams present
+    centres = [(3, 3), (3, 4), (4, 3), (4, 4)]
+    empty_centre = int(rng.integers(0, len(centres)))
+    non_empty = [i for i in range(len(centres)) if i != empty_centre]
 
-    colors = [PlayerColor.RED, PlayerColor.BLUE, PlayerColor.YELLOW, PlayerColor.GREEN]
-    coord_iter = iter(coords)
+    # Ensure both teams appear in the centre (but don't start already winning).
+    team_b_centre = int(rng.choice(non_empty))
+    team_a_centres = [i for i in non_empty if i != team_b_centre]
+
+    # Pick concrete colors for those teams.
+    team_a_colors = [PlayerColor.RED, PlayerColor.YELLOW]
+    team_b_colors = [PlayerColor.BLUE, PlayerColor.GREEN]
+    rng.shuffle(team_a_colors)
+    rng.shuffle(team_b_colors)
+
+    # Place 2x Team A and 1x Team B in the centres (one centre is left empty).
+    board[centres[team_a_centres[0]]] = int(team_a_colors[0])
+    board[centres[team_a_centres[1]]] = int(team_a_colors[1])
+    board[centres[team_b_centre]] = int(team_b_colors[0])
+
+    # Fill remaining pieces, biased near the centre to create interaction.
+    ring: List[Tuple[int, int]] = []
+    for r in range(8):
+        for c in range(8):
+            if (r, c) in centres:
+                continue
+            # distance to nearest centre cell
+            d = min(abs(r - cr) + abs(c - cc) for cr, cc in centres)
+            if d <= 2:
+                ring.append((r, c))
+    # fall back pool (entire board excluding centres)
+    outer = [
+        (r, c)
+        for r in range(8)
+        for c in range(8)
+        if (r, c) not in centres
+    ]
+
+    # Determine per-color remaining counts after centre placements.
+    placed_counts = {color: 0 for color in PlayerColor}
+    placed_counts[team_a_colors[0]] += 1
+    placed_counts[team_a_colors[1]] += 1
+    placed_counts[team_b_colors[0]] += 1
+
+    # Candidate coordinate list, centre-biased then outer.
+    rng.shuffle(ring)
+    rng.shuffle(outer)
+    coord_pool = ring + outer
+    coord_iter = (pos for pos in coord_pool if board[pos] == 0)
+
+    colors = [
+        PlayerColor.RED,
+        PlayerColor.BLUE,
+        PlayerColor.YELLOW,
+        PlayerColor.GREEN,
+    ]
     for color in colors:
-        for _ in range(4):
+        remaining = 4 - placed_counts[color]
+        for _ in range(remaining):
             r, c = next(coord_iter)
             board[r, c] = int(color)
 
@@ -194,7 +257,10 @@ class SelfPlayManager:
         self.env_factory = env_factory
         self.temperature = temperature
         self.rng = np.random.default_rng(seed)
-        self.temperature_schedule = self._normalize_schedule(temperature_schedule, default=temperature)
+        self.temperature_schedule = self._normalize_schedule(
+            temperature_schedule,
+            default=temperature,
+        )
         self.evaluator = evaluator
         self.early_termination = early_termination
         self.step_penalty = float(step_penalty)
@@ -247,8 +313,15 @@ class SelfPlayManager:
         }
         if workers <= 1:
             for _ in range(episodes):
-                game_result, move_count, stats = self._play_single_episode(self.policy)
-                self._accumulate_results(results, game_result, move_count, stats)
+                game_result, move_count, stats = self._play_single_episode(
+                    self.policy
+                )
+                self._accumulate_results(
+                    results,
+                    game_result,
+                    move_count,
+                    stats,
+                )
         else:
             counts = [episodes // workers] * workers
             for i in range(episodes % workers):
@@ -260,7 +333,9 @@ class SelfPlayManager:
                         continue
                     seed = int(self.rng.integers(2**32))
                     policy = self.policy.spawn(seed)
-                    futures.append(executor.submit(self._run_worker, policy, count, seed))
+                    futures.append(
+                        executor.submit(self._run_worker, policy, count, seed)
+                    )
                 for future in futures:
                     worker_result = future.result()
                     for key in (
@@ -274,14 +349,26 @@ class SelfPlayManager:
                         "total_moves",
                     ):
                         results[key] += worker_result[key]
-                    results["center_wins_team_a"] += worker_result["center_wins_team_a"]
-                    results["center_wins_team_b"] += worker_result["center_wins_team_b"]
-                    results["center_wins_none"] += worker_result["center_wins_none"]
+                    results["center_wins_team_a"] += worker_result[
+                        "center_wins_team_a"
+                    ]
+                    results["center_wins_team_b"] += worker_result[
+                        "center_wins_team_b"
+                    ]
+                    results["center_wins_none"] += worker_result[
+                        "center_wins_none"
+                    ]
                     for idx in range(4):
-                        results["death_turn_sum"][idx] += worker_result["death_turn_sum"][idx]
-                        results["death_turn_count"][idx] += worker_result["death_turn_count"][idx]
+                        results["death_turn_sum"][idx] += worker_result[
+                            "death_turn_sum"
+                        ][idx]
+                        results["death_turn_count"][idx] += worker_result[
+                            "death_turn_count"
+                        ][idx]
         if results["games_played"]:
-            results["average_moves"] = results["total_moves"] / results["games_played"]
+            results["average_moves"] = (
+                results["total_moves"] / results["games_played"]
+            )
         else:
             results["average_moves"] = 0.0
         results["average_death_turns"] = [
@@ -333,7 +420,9 @@ class SelfPlayManager:
                 raise ValueError("Policy output shape mismatch.")
             policy_probs = policy_probs * legal_mask
             if policy_probs.sum() <= 0:
-                raise ValueError("Policy assigned zero probability to legal moves.")
+                raise ValueError(
+                    "Policy assigned zero probability to legal moves."
+                )
             policy_probs = policy_probs / policy_probs.sum()
 
             current_player = state_snapshot.current_player
@@ -354,21 +443,29 @@ class SelfPlayManager:
 
             dead_after = env._state.dead_players
             for idx in range(4):
-                if dead_after[idx] and not dead_before[idx] and death_turns[idx] < 0:
+                if (
+                    dead_after[idx]
+                    and not dead_before[idx]
+                    and death_turns[idx] < 0
+                ):
                     death_turns[idx] = move_index
 
             # Early termination checks (post-step)
             early_cfg = self.early_termination
             value_pred: Optional[float] = None
             if self.value_fn and (
-                early_cfg.enable_resign or early_cfg.enable_value_draw or early_cfg.enable_soft_maxply
+                early_cfg.enable_resign
+                or early_cfg.enable_value_draw
+                or early_cfg.enable_soft_maxply
             ):
                 value_pred = float(self.value_fn(env._state))
 
             # Repetition draw
             if early_cfg.enable_repetition:
                 board_key = env._state.board.tobytes()
-                repetition_counts[board_key] = repetition_counts.get(board_key, 0) + 1
+                repetition_counts[board_key] = (
+                    repetition_counts.get(board_key, 0) + 1
+                )
                 if repetition_counts[board_key] >= early_cfg.repetition_count:
                     env._state.result = GameResult.DRAW
                     final_reward = 0.0
@@ -390,7 +487,11 @@ class SelfPlayManager:
                     early_reason = "stagnation"
 
             # Value-based draw (near-even for long)
-            if not terminated and early_cfg.enable_value_draw and value_pred is not None:
+            if (
+                not terminated
+                and early_cfg.enable_value_draw
+                and value_pred is not None
+            ):
                 if abs(value_pred) < early_cfg.value_draw_band:
                     value_draw_streak += 1
                 else:
@@ -402,8 +503,15 @@ class SelfPlayManager:
                     early_reason = "value_draw"
 
             # Resign if clearly losing for consecutive moves
-            if not terminated and early_cfg.enable_resign and value_pred is not None:
-                if move_index >= early_cfg.resign_min_moves and abs(value_pred) >= early_cfg.resign_threshold:
+            if (
+                not terminated
+                and early_cfg.enable_resign
+                and value_pred is not None
+            ):
+                if (
+                    move_index >= early_cfg.resign_min_moves
+                    and abs(value_pred) >= early_cfg.resign_threshold
+                ):
                     resign_streak += 1
                 else:
                     resign_streak = 0
@@ -421,11 +529,18 @@ class SelfPlayManager:
                     early_reason = "resign"
 
             # Soft max-ply: near-even and close to cap -> draw
-            if not terminated and early_cfg.enable_soft_maxply and value_pred is not None:
+            if (
+                not terminated
+                and early_cfg.enable_soft_maxply
+                and value_pred is not None
+            ):
                 remaining = getattr(env, "_max_ply", None)
                 if remaining is not None:
                     remaining = env._max_ply - (move_index + 1)
-                    if remaining <= early_cfg.soft_remaining_moves and abs(value_pred) < early_cfg.soft_value_band:
+                    if (
+                        remaining <= early_cfg.soft_remaining_moves
+                        and abs(value_pred) < early_cfg.soft_value_band
+                    ):
                         env._state.result = GameResult.DRAW
                         final_reward = 0.0
                         terminated = True
@@ -449,7 +564,10 @@ class SelfPlayManager:
 
         move_count = len(trajectory)
         for step, value in zip(trajectory, final_values):
-            adjusted_value = value - (self.step_penalty * move_count) if self.step_penalty != 0.0 else value
+            if self.step_penalty != 0.0:
+                adjusted_value = value - (self.step_penalty * move_count)
+            else:
+                adjusted_value = value
             self.buffer.add(
                 ReplaySample(
                     board=step.board,
@@ -498,7 +616,12 @@ class SelfPlayManager:
             reason = game_stats.get("draw_reason")
             if reason == "max_ply":
                 results["draws_max_ply"] += 1
-            elif reason in ("repetition", "stagnation", "value_draw", "soft_max_ply"):
+            elif reason in (
+                "repetition",
+                "stagnation",
+                "value_draw",
+                "soft_max_ply",
+            ):
                 results["draws_early"] += 1
             else:
                 results["draws_other"] += 1
@@ -517,7 +640,12 @@ class SelfPlayManager:
                 results["death_turn_sum"][idx] += float(turn)
                 results["death_turn_count"][idx] += 1
 
-    def _run_worker(self, policy: Policy, episodes: int, seed: Optional[int] = None) -> Dict[str, object]:
+    def _run_worker(
+        self,
+        policy: Policy,
+        episodes: int,
+        seed: Optional[int] = None,
+    ) -> Dict[str, object]:
         worker_results = {
             "games_played": 0,
             "team_a_wins": 0,
@@ -535,11 +663,23 @@ class SelfPlayManager:
         }
         rng = np.random.default_rng(seed)
         for _ in range(episodes):
-            game_result, move_count, game_stats = self._play_single_episode(policy, rng)
-            self._accumulate_results(worker_results, game_result, move_count, game_stats)
+            game_result, move_count, game_stats = self._play_single_episode(
+                policy,
+                rng,
+            )
+            self._accumulate_results(
+                worker_results,
+                game_result,
+                move_count,
+                game_stats,
+            )
         return worker_results
 
-    def _final_values(self, final_reward: float, trajectory: Sequence[TrajectoryStep]) -> List[float]:
+    def _final_values(
+        self,
+        final_reward: float,
+        trajectory: Sequence[TrajectoryStep],
+    ) -> List[float]:
         if final_reward > 0:
             winning_team = "A"
         elif final_reward < 0:
