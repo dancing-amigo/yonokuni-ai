@@ -156,8 +156,16 @@ def _init_endgame_state(
     state: GameState,
     *,
     rng: np.random.Generator,
+    style: str = "centre_skirmish",
 ) -> GameState:
-    """Mutate a GameState to a late-game setup with 4 pieces per color."""
+    """Mutate a GameState to a late-game setup with 4 pieces per color.
+
+    Styles:
+    - 'centre_skirmish': centre-biased, mixed teams near centre (default)
+    - 'asymmetric': one team biased towards centre, the other towards edges
+    """
+    if style == "asymmetric":
+        return _init_endgame_state_asymmetric(state, rng=rng)
     board = state.board
     board[:] = 0
     # We want positions that are likely to create centre fights
@@ -237,6 +245,111 @@ def _init_endgame_state(
     return state
 
 
+def _init_endgame_state_asymmetric(
+    state: GameState,
+    *,
+    rng: np.random.Generator,
+) -> GameState:
+    """Asymmetric endgame start: one team near centre, the other near edges.
+
+    The centre-biased team is chosen randomly per episode to avoid bias.
+    """
+    board = state.board
+    board[:] = 0
+
+    centres = [(3, 3), (3, 4), (4, 3), (4, 4)]
+    empty_centre = int(rng.integers(0, len(centres)))
+    non_empty = [i for i in range(len(centres)) if i != empty_centre]
+
+    # Randomize which team is centre-biased each episode.
+    centre_team = "A" if rng.random() < 0.5 else "B"
+    if centre_team == "A":
+        centre_colors = [PlayerColor.RED, PlayerColor.YELLOW]
+        edge_colors = [PlayerColor.BLUE, PlayerColor.GREEN]
+    else:
+        centre_colors = [PlayerColor.BLUE, PlayerColor.GREEN]
+        edge_colors = [PlayerColor.RED, PlayerColor.YELLOW]
+    rng.shuffle(centre_colors)
+    rng.shuffle(edge_colors)
+
+    # Put 2 centre-team pieces + 1 edge-team piece in the centre
+    # (one is empty),
+    # to create an advantage without an immediate terminal win.
+    edge_centre = int(rng.choice(non_empty))
+    centre_cents = [i for i in non_empty if i != edge_centre]
+    board[centres[centre_cents[0]]] = int(centre_colors[0])
+    board[centres[centre_cents[1]]] = int(centre_colors[1])
+    board[centres[edge_centre]] = int(edge_colors[0])
+
+    def dist_to_centre(r: int, c: int) -> int:
+        return min(abs(r - cr) + abs(c - cc) for cr, cc in centres)
+
+    # Pools
+    centre_pool: List[Tuple[int, int]] = []
+    edge_pool: List[Tuple[int, int]] = []
+    fallback: List[Tuple[int, int]] = []
+    for r in range(8):
+        for c in range(8):
+            if (r, c) in centres:
+                continue
+            d = dist_to_centre(r, c)
+            if d <= 2:
+                centre_pool.append((r, c))
+            if r in (0, 7) or c in (0, 7):
+                edge_pool.append((r, c))
+            fallback.append((r, c))
+    rng.shuffle(centre_pool)
+    rng.shuffle(edge_pool)
+    rng.shuffle(fallback)
+
+    placed_counts = {color: 0 for color in PlayerColor}
+    placed_counts[centre_colors[0]] += 1
+    placed_counts[centre_colors[1]] += 1
+    placed_counts[edge_colors[0]] += 1
+
+    def take_from(pool: List[Tuple[int, int]]):
+        for pos in pool:
+            if board[pos] == 0:
+                yield pos
+
+    centre_iter = take_from(centre_pool)
+    edge_iter = take_from(edge_pool)
+    fallback_iter = take_from(fallback)
+
+    def place(color: PlayerColor, count: int, prefer: str) -> None:
+        it = centre_iter if prefer == "centre" else edge_iter
+        for _ in range(count):
+            try:
+                r, c = next(it)
+            except StopIteration:
+                r, c = next(fallback_iter)
+            board[r, c] = int(color)
+
+    for color in (
+        PlayerColor.RED,
+        PlayerColor.BLUE,
+        PlayerColor.YELLOW,
+        PlayerColor.GREEN,
+    ):
+        remaining = 4 - placed_counts[color]
+        if remaining <= 0:
+            continue
+        if color in centre_colors:
+            place(color, remaining, "centre")
+        else:
+            place(color, remaining, "edge")
+
+    state.board = board
+    state.dead_mask[:] = False
+    state.dead_players[:] = False
+    state.captured_counts[:] = 0
+    state.current_player = rng.choice(list(PlayerColor))
+    state.ply_count = 0
+    state.result = GameResult.ONGOING
+    state.last_action = None
+    return state
+
+
 class SelfPlayManager:
     def __init__(
         self,
@@ -251,6 +364,7 @@ class SelfPlayManager:
         early_termination: EarlyTerminationConfig = EarlyTerminationConfig(),
         step_penalty: float = 0.0,
         endgame_start: bool = False,
+        endgame_start_style: str = "centre_skirmish",
     ) -> None:
         self.buffer = buffer
         self.policy = policy or RandomPolicy()
@@ -265,6 +379,9 @@ class SelfPlayManager:
         self.early_termination = early_termination
         self.step_penalty = float(step_penalty)
         self.endgame_start = endgame_start
+        self.endgame_start_style = str(
+            endgame_start_style or "centre_skirmish"
+        )
 
         self.value_fn: Optional[Callable[[GameState], float]] = None
         if self.evaluator:
@@ -389,7 +506,11 @@ class SelfPlayManager:
         obs, info = env.reset()
 
         if self.endgame_start:
-            env._state = _init_endgame_state(env._state, rng=rng)
+            env._state = _init_endgame_state(
+                env._state,
+                rng=rng,
+                style=self.endgame_start_style,
+            )
             obs = env._build_observation()
             info = env._build_info()
 

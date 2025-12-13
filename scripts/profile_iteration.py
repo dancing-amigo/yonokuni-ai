@@ -3,7 +3,9 @@
 Profile a self-play + training iteration to see where time is spent.
 
 Example (Windows GPU preset):
-  python scripts/profile_iteration.py --config configs/self_play_windows_gpu.yaml --iterations 1
+  python scripts/profile_iteration.py \\
+      --config configs/self_play_windows_gpu.yaml \\
+      --iterations 1
 Override knobs as needed:
   --episodes 24 --train-steps 128 --mcts-simulations 16 --self-play-workers 4
 """
@@ -44,17 +46,41 @@ def _make_env_factory(env_max_ply: Optional[int]) -> YonokuniEnv:
 
 
 def build_config(args: argparse.Namespace, cfg: Dict) -> SelfPlayTrainerConfig:
-    episodes = args.episodes if args.episodes is not None else cfg.get("episodes_per_iteration", 8)
-    train_steps = args.train_steps if args.train_steps is not None else cfg.get("training_steps_per_iteration", 16)
-    log_dir = args.log_dir if args.log_dir is not None else cfg.get("log_dir")
-    checkpoint_dir = args.checkpoint_dir if args.checkpoint_dir is not None else cfg.get("checkpoint_dir")
-    checkpoint_interval = args.checkpoint_interval if args.checkpoint_interval is not None else cfg.get(
-        "checkpoint_interval", 10
+    episodes = (
+        args.episodes
+        if args.episodes is not None
+        else cfg.get("episodes_per_iteration", 8)
     )
-    temperature = args.temperature if args.temperature is not None else cfg.get("temperature", 1.0)
-    workers = args.self_play_workers if args.self_play_workers is not None else cfg.get("self_play_workers", 1)
+    train_steps = (
+        args.train_steps
+        if args.train_steps is not None
+        else cfg.get("training_steps_per_iteration", 16)
+    )
+    log_dir = args.log_dir if args.log_dir is not None else cfg.get("log_dir")
+    checkpoint_dir = (
+        args.checkpoint_dir
+        if args.checkpoint_dir is not None
+        else cfg.get("checkpoint_dir")
+    )
+    checkpoint_interval = (
+        args.checkpoint_interval
+        if args.checkpoint_interval is not None
+        else cfg.get("checkpoint_interval", 10)
+    )
+    temperature = (
+        args.temperature
+        if args.temperature is not None
+        else cfg.get("temperature", 1.0)
+    )
+    workers = (
+        args.self_play_workers
+        if args.self_play_workers is not None
+        else cfg.get("self_play_workers", 1)
+    )
     validation_sample_size = (
-        args.validation_sample_size if args.validation_sample_size is not None else cfg.get("validation_sample_size", 0)
+        args.validation_sample_size
+        if args.validation_sample_size is not None
+        else cfg.get("validation_sample_size", 0)
     )
     temperature_schedule = cfg.get("temperature_schedule")
 
@@ -69,8 +95,17 @@ def build_config(args: argparse.Namespace, cfg: Dict) -> SelfPlayTrainerConfig:
     training = TrainingConfig(**training_cfg)
     early_stop_cfg = cfg.get("early_termination", {})
     early_stop = EarlyTerminationConfig(**early_stop_cfg)
-    step_penalty = float(cfg.get("step_penalty", 0.0))
+    step_penalty = float(
+        args.step_penalty
+        if args.step_penalty is not None
+        else cfg.get("step_penalty", 0.0)
+    )
     endgame_start = bool(cfg.get("endgame_start", False))
+    endgame_start_style = str(
+        args.endgame_start_style
+        if args.endgame_start_style is not None
+        else cfg.get("endgame_start_style", "centre_skirmish")
+    )
 
     return SelfPlayTrainerConfig(
         episodes_per_iteration=episodes,
@@ -88,6 +123,7 @@ def build_config(args: argparse.Namespace, cfg: Dict) -> SelfPlayTrainerConfig:
         early_termination=early_stop,
         step_penalty=step_penalty,
         endgame_start=endgame_start,
+        endgame_start_style=endgame_start_style,
         wandb_project=args.wandb_project or cfg.get("wandb_project"),
         wandb_run_name=args.wandb_run_name or cfg.get("wandb_run_name"),
         wandb_entity=args.wandb_entity or cfg.get("wandb_entity"),
@@ -95,8 +131,14 @@ def build_config(args: argparse.Namespace, cfg: Dict) -> SelfPlayTrainerConfig:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Profile a self-play + training iteration.")
-    parser.add_argument("--config", type=str, default="configs/self_play_windows_gpu.yaml")
+    parser = argparse.ArgumentParser(
+        description="Profile a self-play + training iteration."
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="configs/self_play_windows_gpu.yaml",
+    )
     parser.add_argument("--episodes", type=int)
     parser.add_argument("--train-steps", type=int)
     parser.add_argument("--iterations", type=int, default=1)
@@ -108,13 +150,42 @@ def main() -> None:
     parser.add_argument("--temperature", type=float)
     parser.add_argument("--self-play-workers", type=int)
     parser.add_argument("--validation-sample-size", type=int)
-    parser.add_argument("--env-max-ply", type=int, help="Override YonokuniEnv max_ply (default 400)")
+    parser.add_argument(
+        "--env-max-ply",
+        type=int,
+        help="Override YonokuniEnv max_ply (default 400)",
+    )
+    parser.add_argument(
+        "--step-penalty",
+        type=float,
+        help="Override step_penalty (per-move)",
+    )
+    parser.add_argument(
+        "--endgame-start-style",
+        type=str,
+        help=(
+            "Override endgame_start_style "
+            "(e.g. 'centre_skirmish' or 'asymmetric')"
+        ),
+    )
     parser.add_argument("--wandb-project")
     parser.add_argument("--wandb-run-name")
     parser.add_argument("--wandb-entity")
-    parser.add_argument("--resume-from", type=str, help="Checkpoint path to resume from")
-    parser.add_argument("--skip-validation", action="store_true", help="Skip validation check during profiling")
-    parser.add_argument("--print-gpu", action="store_true", help="Print CUDA device info once at start")
+    parser.add_argument(
+        "--resume-from",
+        type=str,
+        help="Checkpoint path to resume from",
+    )
+    parser.add_argument(
+        "--skip-validation",
+        action="store_true",
+        help="Skip validation check during profiling",
+    )
+    parser.add_argument(
+        "--print-gpu",
+        action="store_true",
+        help="Print CUDA device info once at start",
+    )
     args = parser.parse_args()
 
     cfg = load_yaml_config(args.config)
@@ -133,7 +204,16 @@ def main() -> None:
         if torch is not None and torch.cuda.is_available():
             device_name = torch.cuda.get_device_name(0)
             capability = torch.cuda.get_device_capability(0)
-            print(json.dumps({"cuda": True, "device": device_name, "capability": capability}, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "cuda": True,
+                        "device": device_name,
+                        "capability": capability,
+                    },
+                    indent=2,
+                )
+            )
         else:
             print(json.dumps({"cuda": False}, indent=2))
 
@@ -160,13 +240,19 @@ def main() -> None:
                 and config.validation_sample_size > 0
                 and len(trainer.replay_buffer) >= config.validation_sample_size
             ):
-                validate_buffer_sample(trainer.replay_buffer, config.validation_sample_size)
+                validate_buffer_sample(
+                    trainer.replay_buffer,
+                    config.validation_sample_size,
+                )
 
             buffer_size = len(trainer.replay_buffer)
             avg_metrics = {}
             if metrics:
                 keys = metrics[0].keys()
-                avg_metrics = {k: float(sum(m[k] for m in metrics) / len(metrics)) for k in keys}
+                avg_metrics = {
+                    k: float(sum(m[k] for m in metrics) / len(metrics))
+                    for k in keys
+                }
 
             trainer.iteration_index += 1
 
@@ -175,22 +261,47 @@ def main() -> None:
             total_time = t2 - t0
 
             games = self_play_stats.get("games_played", 0)
-            games_per_sec = games / self_play_time if self_play_time > 0 else 0.0
-            train_steps_per_sec = config.training_steps_per_iteration / train_time if train_time > 0 else 0.0
+            games_per_sec = (
+                games / self_play_time
+                if self_play_time > 0
+                else 0.0
+            )
+            train_steps_per_sec = (
+                config.training_steps_per_iteration / train_time
+                if train_time > 0
+                else 0.0
+            )
+
+            training_steps_per_iteration = (
+                config.training_steps_per_iteration
+            )
+            effective_early = getattr(config, "early_termination", None)
+            effective_config = {
+                "episodes_per_iteration": config.episodes_per_iteration,
+                "training_steps_per_iteration": training_steps_per_iteration,
+                "mcts_num_simulations": config.mcts_config.num_simulations,
+                "env_max_ply": getattr(
+                    trainer.self_play.env_factory(),
+                    "_max_ply",
+                    None,
+                ),
+                "step_penalty": getattr(config, "step_penalty", 0.0),
+                "endgame_start": getattr(config, "endgame_start", False),
+                "endgame_start_style": getattr(
+                    config,
+                    "endgame_start_style",
+                    None,
+                ),
+                "early_termination": (
+                    vars(effective_early)
+                    if effective_early is not None
+                    else None
+                ),
+            }
 
             result = {
                 "iteration": iter_index,
-                "effective_config": {
-                    "episodes_per_iteration": config.episodes_per_iteration,
-                    "training_steps_per_iteration": config.training_steps_per_iteration,
-                    "mcts_num_simulations": config.mcts_config.num_simulations,
-                    "env_max_ply": getattr(trainer.self_play.env_factory(), "_max_ply", None),
-                    "step_penalty": getattr(config, "step_penalty", 0.0),
-                    "endgame_start": getattr(config, "endgame_start", False),
-                    "early_termination": vars(getattr(config, "early_termination", None))
-                    if getattr(config, "early_termination", None) is not None
-                    else None,
-                },
+                "effective_config": effective_config,
                 "buffer_size": buffer_size,
                 "self_play_time_sec": self_play_time,
                 "train_time_sec": train_time,

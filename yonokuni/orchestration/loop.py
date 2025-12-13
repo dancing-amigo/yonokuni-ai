@@ -31,7 +31,9 @@ class SelfPlayTrainerConfig:
     training_steps_per_iteration: int = 32
     buffer_capacity: int = 500_000
     self_play_transforms: Optional[list] = None
-    mcts_config: MCTSConfig = field(default_factory=lambda: MCTSConfig(num_simulations=64))
+    mcts_config: MCTSConfig = field(
+        default_factory=lambda: MCTSConfig(num_simulations=64)
+    )
     training_config: TrainingConfig = field(default_factory=TrainingConfig)
     model_config: YonokuniNetConfig = field(default_factory=YonokuniNetConfig)
     temperature: float = 1.0
@@ -46,9 +48,14 @@ class SelfPlayTrainerConfig:
     wandb_project: Optional[str] = None
     wandb_run_name: Optional[str] = None
     wandb_entity: Optional[str] = None
-    early_termination: EarlyTerminationConfig = field(default_factory=EarlyTerminationConfig)
+    early_termination: EarlyTerminationConfig = field(
+        default_factory=EarlyTerminationConfig
+    )
     step_penalty: float = 0.0
-    endgame_start: bool = False  # if True, start from a late-game randomized setup
+    # If True, start from a late-game randomized setup.
+    endgame_start: bool = False
+    # 'centre_skirmish' | 'asymmetric'
+    endgame_start_style: str = "centre_skirmish"
 
 
 class SelfPlayTrainer:
@@ -59,7 +66,11 @@ class SelfPlayTrainer:
         device: Optional[torch.device] = None,
     ) -> None:
         self.config = config
-        self.device = device or config.training_config.device or torch.device("cpu")
+        self.device = (
+            device
+            or config.training_config.device
+            or torch.device("cpu")
+        )
         rng = np.random.default_rng(config.seed)
 
         self.model = YonokuniNet(config.model_config).to(device=self.device)
@@ -78,7 +89,11 @@ class SelfPlayTrainer:
         self.training_config = config.training_config
         self.training_config.device = self.device
 
-        self.evaluator = YonokuniEvaluator(self.model, device=self.device, dtype=self.training_config.dtype)
+        self.evaluator = YonokuniEvaluator(
+            self.model,
+            device=self.device,
+            dtype=self.training_config.dtype,
+        )
 
         self.trainer = Trainer(
             self.model,
@@ -104,6 +119,7 @@ class SelfPlayTrainer:
             early_termination=config.early_termination,
             step_penalty=config.step_penalty,
             endgame_start=config.endgame_start,
+            endgame_start_style=config.endgame_start_style,
         )
 
         self.writer: Optional[SummaryWriter] = None
@@ -117,18 +133,24 @@ class SelfPlayTrainer:
             try:
                 import wandb
             except ImportError as exc:
-                raise RuntimeError('wandb is not installed but wandb_project is set') from exc
+                raise RuntimeError(
+                    "wandb is not installed but wandb_project is set"
+                ) from exc
             self._wandb = wandb
             self.wandb_run = wandb.init(
                 project=self.config.wandb_project,
                 name=self.config.wandb_run_name,
                 entity=self.config.wandb_entity,
                 config={
-                    'episodes_per_iteration': self.config.episodes_per_iteration,
-                    'training_steps_per_iteration': self.config.training_steps_per_iteration,
-                    'buffer_capacity': self.config.buffer_capacity,
-                    'mcts': vars(self.config.mcts_config),
-                    'training': self.config.training_config.__dict__,
+                    "episodes_per_iteration": (
+                        self.config.episodes_per_iteration
+                    ),
+                    "training_steps_per_iteration": (
+                        self.config.training_steps_per_iteration
+                    ),
+                    "buffer_capacity": self.config.buffer_capacity,
+                    "mcts": vars(self.config.mcts_config),
+                    "training": self.config.training_config.__dict__,
                 },
             )
 
@@ -147,38 +169,110 @@ class SelfPlayTrainer:
             metrics.append(result)
             if self.writer:
                 for key, value in result.items():
-                    self.writer.add_scalar(f"train/{key}", value, self.training_step_count)
+                    self.writer.add_scalar(
+                        f"train/{key}",
+                        value,
+                        self.training_step_count,
+                    )
             self.training_step_count += 1
 
-        if self.config.validation_sample_size > 0 and len(self.replay_buffer) >= self.config.validation_sample_size:
-            validate_buffer_sample(self.replay_buffer, self.config.validation_sample_size)
+        if (
+            self.config.validation_sample_size > 0
+            and len(self.replay_buffer) >= self.config.validation_sample_size
+        ):
+            validate_buffer_sample(
+                self.replay_buffer,
+                self.config.validation_sample_size,
+            )
 
         buffer_size = len(self.replay_buffer)
         avg_metrics = {}
         if metrics:
             keys = metrics[0].keys()
-            avg_metrics = {k: float(np.mean([m[k] for m in metrics])) for k in keys}
+            avg_metrics = {
+                k: float(np.mean([m[k] for m in metrics]))
+                for k in keys
+            }
         games = self_play_stats["games_played"]
-        team_a_winrate = (self_play_stats["team_a_wins"] / games) if games else 0.0
-        team_b_winrate = (self_play_stats["team_b_wins"] / games) if games else 0.0
-        center_a_rate = (self_play_stats["center_wins_team_a"] / games) if games else 0.0
-        center_b_rate = (self_play_stats["center_wins_team_b"] / games) if games else 0.0
-        center_none_rate = (self_play_stats["center_wins_none"] / games) if games else 0.0
+        team_a_winrate = (
+            self_play_stats["team_a_wins"] / games
+            if games
+            else 0.0
+        )
+        team_b_winrate = (
+            self_play_stats["team_b_wins"] / games
+            if games
+            else 0.0
+        )
+        center_a_rate = (
+            self_play_stats["center_wins_team_a"] / games
+            if games
+            else 0.0
+        )
+        center_b_rate = (
+            self_play_stats["center_wins_team_b"] / games
+            if games
+            else 0.0
+        )
+        center_none_rate = (
+            self_play_stats["center_wins_none"] / games
+            if games
+            else 0.0
+        )
         avg_moves = self_play_stats.get("average_moves", 0.0)
         if self.writer:
-            self.writer.add_scalar("buffer/size", buffer_size, self.iteration_index)
-            self.writer.add_scalar("self_play/team_a_winrate", team_a_winrate, self.iteration_index)
-            self.writer.add_scalar("self_play/team_b_winrate", team_b_winrate, self.iteration_index)
-            self.writer.add_scalar("self_play/center_rate_team_a", center_a_rate, self.iteration_index)
-            self.writer.add_scalar("self_play/center_rate_team_b", center_b_rate, self.iteration_index)
-            self.writer.add_scalar("self_play/center_rate_none", center_none_rate, self.iteration_index)
-            self.writer.add_scalar("self_play/average_moves", avg_moves, self.iteration_index)
-            average_death_turns = self_play_stats.get("average_death_turns", [])
+            self.writer.add_scalar(
+                "buffer/size",
+                buffer_size,
+                self.iteration_index,
+            )
+            self.writer.add_scalar(
+                "self_play/team_a_winrate",
+                team_a_winrate,
+                self.iteration_index,
+            )
+            self.writer.add_scalar(
+                "self_play/team_b_winrate",
+                team_b_winrate,
+                self.iteration_index,
+            )
+            self.writer.add_scalar(
+                "self_play/center_rate_team_a",
+                center_a_rate,
+                self.iteration_index,
+            )
+            self.writer.add_scalar(
+                "self_play/center_rate_team_b",
+                center_b_rate,
+                self.iteration_index,
+            )
+            self.writer.add_scalar(
+                "self_play/center_rate_none",
+                center_none_rate,
+                self.iteration_index,
+            )
+            self.writer.add_scalar(
+                "self_play/average_moves",
+                avg_moves,
+                self.iteration_index,
+            )
+            average_death_turns = self_play_stats.get(
+                "average_death_turns",
+                [],
+            )
             for idx, value in enumerate(average_death_turns):
                 if value is not None:
-                    self.writer.add_scalar(f"self_play/death_turn_color{idx+1}", value, self.iteration_index)
+                    self.writer.add_scalar(
+                        f"self_play/death_turn_color{idx+1}",
+                        value,
+                        self.iteration_index,
+                    )
             for key, value in avg_metrics.items():
-                self.writer.add_scalar(f"train_avg/{key}", value, self.iteration_index)
+                self.writer.add_scalar(
+                    f"train_avg/{key}",
+                    value,
+                    self.iteration_index,
+                )
             self.writer.flush()
         if self.wandb_run and self._wandb:
             log_data = {f"train_avg/{k}": v for k, v in avg_metrics.items()}
@@ -195,11 +289,18 @@ class SelfPlayTrainer:
                 }
             )
             if games:
-                log_data["self_play/draw_rate"] = self_play_stats["draws"] / games
-                average_death_turns = self_play_stats.get("average_death_turns", [])
+                log_data["self_play/draw_rate"] = (
+                    self_play_stats["draws"] / games
+                )
+                average_death_turns = self_play_stats.get(
+                    "average_death_turns",
+                    [],
+                )
                 for idx, value in enumerate(average_death_turns):
                     if value is not None:
-                        log_data[f"self_play/death_turn_color{idx+1}"] = value
+                        log_data[
+                            f"self_play/death_turn_color{idx+1}"
+                        ] = value
             self._wandb.log(log_data, step=self.iteration_index)
 
         self.iteration_index += 1
