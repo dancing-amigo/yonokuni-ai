@@ -235,6 +235,9 @@ class SelfPlayManager:
             "team_a_wins": 0,
             "team_b_wins": 0,
             "draws": 0,
+            "draws_max_ply": 0,
+            "draws_early": 0,
+            "draws_other": 0,
             "total_moves": 0,
             "center_wins_team_a": 0,
             "center_wins_team_b": 0,
@@ -260,7 +263,16 @@ class SelfPlayManager:
                     futures.append(executor.submit(self._run_worker, policy, count, seed))
                 for future in futures:
                     worker_result = future.result()
-                    for key in ("games_played", "team_a_wins", "team_b_wins", "draws", "total_moves"):
+                    for key in (
+                        "games_played",
+                        "team_a_wins",
+                        "team_b_wins",
+                        "draws",
+                        "draws_max_ply",
+                        "draws_early",
+                        "draws_other",
+                        "total_moves",
+                    ):
                         results[key] += worker_result[key]
                     results["center_wins_team_a"] += worker_result["center_wins_team_a"]
                     results["center_wins_team_b"] += worker_result["center_wins_team_b"]
@@ -426,6 +438,14 @@ class SelfPlayManager:
         final_values = self._final_values(final_reward, trajectory)
         final_result = env._state.result
         center_team = self._center_team(env._state)
+        draw_reason: Optional[str] = None
+        if final_result == GameResult.DRAW:
+            if early_reason is not None:
+                draw_reason = early_reason
+            elif env._state.ply_count >= env._state.max_ply:
+                draw_reason = "max_ply"
+            else:
+                draw_reason = "other"
 
         move_count = len(trajectory)
         for step, value in zip(trajectory, final_values):
@@ -443,6 +463,7 @@ class SelfPlayManager:
             "center_team": center_team,
             "death_turns": death_turns,
             "early_termination": early_reason,
+            "draw_reason": draw_reason,
         }
         return final_result, move_count, game_stats
 
@@ -474,6 +495,13 @@ class SelfPlayManager:
             results["team_b_wins"] += 1
         else:
             results["draws"] += 1
+            reason = game_stats.get("draw_reason")
+            if reason == "max_ply":
+                results["draws_max_ply"] += 1
+            elif reason in ("repetition", "stagnation", "value_draw", "soft_max_ply"):
+                results["draws_early"] += 1
+            else:
+                results["draws_other"] += 1
 
         center_team = game_stats.get("center_team")
         if center_team == "A":
@@ -495,6 +523,9 @@ class SelfPlayManager:
             "team_a_wins": 0,
             "team_b_wins": 0,
             "draws": 0,
+            "draws_max_ply": 0,
+            "draws_early": 0,
+            "draws_other": 0,
             "total_moves": 0,
             "center_wins_team_a": 0,
             "center_wins_team_b": 0,

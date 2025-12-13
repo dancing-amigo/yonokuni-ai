@@ -29,7 +29,5 @@ early_termination:
   enable_value_draw: false
   enable_repetition: false
   enable_soft_maxply: false
-step_penalty: 0.005 # per-move penalty (keep << 1)
-endgame_start: true
 step_penalty: 0.005       # 1手あたりの減点（勝敗±1より十分小さく保つ）
 endgame_start: true      
