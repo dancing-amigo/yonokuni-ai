@@ -565,7 +565,19 @@ class SelfPlayManager:
         move_count = len(trajectory)
         for step, value in zip(trajectory, final_values):
             if self.step_penalty != 0.0:
-                adjusted_value = value - (self.step_penalty * move_count)
+                # Apply per-move penalty without violating value range [-1, 1].
+                #
+                # Interpret step_penalty as "longer games are less desirable"
+                # and
+                # dampen the terminal outcome towards 0 (draw) in proportion to
+                # game length. This avoids making losing values < -1.
+                delta = min(self.step_penalty * move_count, 1.0)
+                if value > 0:
+                    adjusted_value = value - delta
+                elif value < 0:
+                    adjusted_value = value + delta
+                else:
+                    adjusted_value = value
             else:
                 adjusted_value = value
             self.buffer.add(
