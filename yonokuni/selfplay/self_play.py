@@ -163,9 +163,13 @@ def _init_endgame_state(
     Styles:
     - 'centre_skirmish': centre-biased, mixed teams near centre (default)
     - 'asymmetric': one team biased towards centre, the other towards edges
+    - 'asymmetric_strong': like 'asymmetric' but centre team starts with 3/4
+      centre squares occupied (1 centre square left empty)
     """
     if style == "asymmetric":
         return _init_endgame_state_asymmetric(state, rng=rng)
+    if style == "asymmetric_strong":
+        return _init_endgame_state_asymmetric(state, rng=rng, strong=True)
     board = state.board
     board[:] = 0
     # We want positions that are likely to create centre fights
@@ -249,6 +253,7 @@ def _init_endgame_state_asymmetric(
     state: GameState,
     *,
     rng: np.random.Generator,
+    strong: bool = False,
 ) -> GameState:
     """Asymmetric endgame start: one team near centre, the other near edges.
 
@@ -272,14 +277,33 @@ def _init_endgame_state_asymmetric(
     rng.shuffle(centre_colors)
     rng.shuffle(edge_colors)
 
-    # Put 2 centre-team pieces + 1 edge-team piece in the centre
-    # (one is empty),
-    # to create an advantage without an immediate terminal win.
-    edge_centre = int(rng.choice(non_empty))
-    centre_cents = [i for i in non_empty if i != edge_centre]
-    board[centres[centre_cents[0]]] = int(centre_colors[0])
-    board[centres[centre_cents[1]]] = int(centre_colors[1])
-    board[centres[edge_centre]] = int(edge_colors[0])
+    if strong:
+        # Strong advantage: centre team occupies 3 of 4 centre squares
+        # (one centre square is left empty to avoid an immediate win).
+        #
+        # Since each team has two colours, one colour will appear twice.
+        rng.shuffle(non_empty)
+        c0, c1 = centre_colors[0], centre_colors[1]
+        centre_assign = [c0, c1, c0]
+        rng.shuffle(centre_assign)
+        for idx, color in zip(non_empty, centre_assign):
+            board[centres[idx]] = int(color)
+        placed_counts = {color: 0 for color in PlayerColor}
+        placed_counts[c0] += centre_assign.count(c0)
+        placed_counts[c1] += centre_assign.count(c1)
+    else:
+        # Mild advantage:
+        # - 2 centre-team pieces + 1 edge-team piece in the centre
+        # (one centre square is left empty).
+        edge_centre = int(rng.choice(non_empty))
+        centre_cents = [i for i in non_empty if i != edge_centre]
+        board[centres[centre_cents[0]]] = int(centre_colors[0])
+        board[centres[centre_cents[1]]] = int(centre_colors[1])
+        board[centres[edge_centre]] = int(edge_colors[0])
+        placed_counts = {color: 0 for color in PlayerColor}
+        placed_counts[centre_colors[0]] += 1
+        placed_counts[centre_colors[1]] += 1
+        placed_counts[edge_colors[0]] += 1
 
     def dist_to_centre(r: int, c: int) -> int:
         return min(abs(r - cr) + abs(c - cc) for cr, cc in centres)
@@ -301,11 +325,6 @@ def _init_endgame_state_asymmetric(
     rng.shuffle(centre_pool)
     rng.shuffle(edge_pool)
     rng.shuffle(fallback)
-
-    placed_counts = {color: 0 for color in PlayerColor}
-    placed_counts[centre_colors[0]] += 1
-    placed_counts[centre_colors[1]] += 1
-    placed_counts[edge_colors[0]] += 1
 
     def take_from(pool: List[Tuple[int, int]]):
         for pos in pool:

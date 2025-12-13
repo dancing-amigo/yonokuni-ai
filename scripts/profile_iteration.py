@@ -165,7 +165,7 @@ def main() -> None:
         type=str,
         help=(
             "Override endgame_start_style "
-            "(e.g. 'centre_skirmish' or 'asymmetric')"
+            "(e.g. 'centre_skirmish', 'asymmetric', 'asymmetric_strong')"
         ),
     )
     parser.add_argument("--wandb-project")
