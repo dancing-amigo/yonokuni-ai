@@ -291,6 +291,44 @@ def _init_endgame_state_asymmetric(
         placed_counts = {color: 0 for color in PlayerColor}
         placed_counts[c0] += centre_assign.count(c0)
         placed_counts[c1] += centre_assign.count(c1)
+
+        # Add a "runner" piece for the centre team aligned to the empty centre
+        # square, so completing centre control is often possible in a small
+        # number of moves (reduces max_ply draws).
+        empty_r, empty_c = centres[empty_centre]
+        runner_pos: Optional[Tuple[int, int]] = None
+        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            for dist in (1, 2, 3, 4):
+                r = empty_r + dr * dist
+                c = empty_c + dc * dist
+                if not (0 <= r < 8 and 0 <= c < 8):
+                    break
+                if (r, c) in centres:
+                    continue
+                if board[r, c] != 0:
+                    continue
+                # Ensure the path into the empty centre square is clear.
+                clear = True
+                for step in range(1, dist):
+                    rr = empty_r + dr * step
+                    cc = empty_c + dc * step
+                    if board[rr, cc] != 0:
+                        clear = False
+                        break
+                if clear:
+                    runner_pos = (r, c)
+                    break
+            if runner_pos is not None:
+                break
+
+        if runner_pos is not None:
+            runner_color = min(
+                centre_colors,
+                key=lambda col: placed_counts.get(col, 0),
+            )
+            if placed_counts.get(runner_color, 0) < 4:
+                board[runner_pos] = int(runner_color)
+                placed_counts[runner_color] += 1
     else:
         # Mild advantage:
         # - 2 centre-team pieces + 1 edge-team piece in the centre
