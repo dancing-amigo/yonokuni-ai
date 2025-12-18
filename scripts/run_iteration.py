@@ -32,10 +32,16 @@ def main() -> None:
     parser.add_argument("--temperature", type=float)
     parser.add_argument("--self-play-workers", type=int)
     parser.add_argument("--validation-sample-size", type=int)
+    parser.add_argument("--step-penalty", type=float)
+    parser.add_argument("--endgame-start-style", type=str)
     parser.add_argument("--wandb-project")
     parser.add_argument("--wandb-run-name")
     parser.add_argument("--wandb-entity")
-    parser.add_argument("--resume-from", type=str, help="Checkpoint path to resume from")
+    parser.add_argument(
+        "--resume-from",
+        type=str,
+        help="Checkpoint path to resume from",
+    )
     args = parser.parse_args()
 
     cfg = {}
@@ -43,16 +49,42 @@ def main() -> None:
         cfg_path = Path(args.config)
         if cfg_path.exists():
             cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
-    episodes = args.episodes if args.episodes is not None else cfg.get("episodes_per_iteration", 8)
-    train_steps = args.train_steps if args.train_steps is not None else cfg.get("training_steps_per_iteration", 16)
+    episodes = (
+        args.episodes
+        if args.episodes is not None
+        else cfg.get("episodes_per_iteration", 8)
+    )
+    train_steps = (
+        args.train_steps
+        if args.train_steps is not None
+        else cfg.get("training_steps_per_iteration", 16)
+    )
     log_dir = args.log_dir if args.log_dir is not None else cfg.get("log_dir")
-    checkpoint_dir = args.checkpoint_dir if args.checkpoint_dir is not None else cfg.get("checkpoint_dir")
-    checkpoint_interval = args.checkpoint_interval if args.checkpoint_interval is not None else cfg.get(
-        "checkpoint_interval", 10)
-    temperature = args.temperature if args.temperature is not None else cfg.get("temperature", 1.0)
-    workers = args.self_play_workers if args.self_play_workers is not None else cfg.get("self_play_workers", 1)
-    validation_sample_size = args.validation_sample_size if args.validation_sample_size is not None else cfg.get(
-        "validation_sample_size", 0)
+    checkpoint_dir = (
+        args.checkpoint_dir
+        if args.checkpoint_dir is not None
+        else cfg.get("checkpoint_dir")
+    )
+    checkpoint_interval = (
+        args.checkpoint_interval
+        if args.checkpoint_interval is not None
+        else cfg.get("checkpoint_interval", 10)
+    )
+    temperature = (
+        args.temperature
+        if args.temperature is not None
+        else cfg.get("temperature", 1.0)
+    )
+    workers = (
+        args.self_play_workers
+        if args.self_play_workers is not None
+        else cfg.get("self_play_workers", 1)
+    )
+    validation_sample_size = (
+        args.validation_sample_size
+        if args.validation_sample_size is not None
+        else cfg.get("validation_sample_size", 0)
+    )
     temperature_schedule = cfg.get("temperature_schedule")
 
     mcts_cfg = cfg.get("mcts", {})
@@ -65,8 +97,17 @@ def main() -> None:
     training = TrainingConfig(**training_cfg)
     early_stop_cfg = cfg.get("early_termination", {})
     early_stop = EarlyTerminationConfig(**early_stop_cfg)
-    step_penalty = float(cfg.get("step_penalty", 0.0))
+    step_penalty = float(
+        args.step_penalty
+        if args.step_penalty is not None
+        else cfg.get("step_penalty", 0.0)
+    )
     endgame_start = bool(cfg.get("endgame_start", False))
+    endgame_start_style = str(
+        args.endgame_start_style
+        if args.endgame_start_style is not None
+        else cfg.get("endgame_start_style", "centre_skirmish")
+    )
 
     config = SelfPlayTrainerConfig(
         episodes_per_iteration=episodes,
@@ -83,6 +124,7 @@ def main() -> None:
         early_termination=early_stop,
         step_penalty=step_penalty,
         endgame_start=endgame_start,
+        endgame_start_style=endgame_start_style,
         wandb_project=args.wandb_project or cfg.get("wandb_project"),
         wandb_run_name=args.wandb_run_name or cfg.get("wandb_run_name"),
         wandb_entity=args.wandb_entity or cfg.get("wandb_entity"),
@@ -92,7 +134,11 @@ def main() -> None:
     if args.resume_from:
         trainer.load_checkpoint(args.resume_from)
     try:
-        iterator = trange(args.iterations, desc="Iterations") if trange is not range else range(args.iterations)
+        iterator = (
+            trange(args.iterations, desc="Iterations")
+            if trange is not range
+            else range(args.iterations)
+        )
         for i in iterator:
             result = trainer.iteration()
             print(json.dumps({"iteration": i + 1, **result}, indent=2))
