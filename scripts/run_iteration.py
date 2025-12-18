@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Run a single self-play/train iteration for smoke testing."""
+"""Run self-play/train iterations."""
 
 import argparse
 import json
 from pathlib import Path
 
 import yaml
+
+from yonokuni.env import YonokuniEnv
 
 try:
     from tqdm.auto import trange
@@ -16,6 +18,16 @@ from yonokuni.mcts import MCTSConfig
 from yonokuni.orchestration import SelfPlayTrainer, SelfPlayTrainerConfig
 from yonokuni.selfplay import EarlyTerminationConfig
 from yonokuni.training import TrainingConfig
+
+
+def _make_env_factory(env_max_ply):
+    if env_max_ply is None:
+        return YonokuniEnv  # type: ignore[return-value]
+
+    def factory() -> YonokuniEnv:
+        return YonokuniEnv(max_ply=int(env_max_ply))
+
+    return factory  # type: ignore[return-value]
 
 
 def main() -> None:
@@ -32,6 +44,7 @@ def main() -> None:
     parser.add_argument("--temperature", type=float)
     parser.add_argument("--self-play-workers", type=int)
     parser.add_argument("--validation-sample-size", type=int)
+    parser.add_argument("--env-max-ply", type=int)
     parser.add_argument("--step-penalty", type=float)
     parser.add_argument("--endgame-start-style", type=str)
     parser.add_argument("--wandb-project")
@@ -41,6 +54,24 @@ def main() -> None:
         "--resume-from",
         type=str,
         help="Checkpoint path to resume from",
+    )
+    parser.add_argument(
+        "--skip-validation",
+        action="store_true",
+        help="Skip validation by forcing validation_sample_size=0",
+    )
+    parser.add_argument(
+        "--print-gpu",
+        action="store_true",
+        help="Print CUDA device info once at start",
+    )
+    parser.add_argument(
+        "--print-effective-config",
+        action="store_true",
+        help=(
+            "Print effective config once at start "
+            "(helps avoid config mismatch)."
+        ),
     )
     args = parser.parse_args()
 
@@ -85,6 +116,13 @@ def main() -> None:
         if args.validation_sample_size is not None
         else cfg.get("validation_sample_size", 0)
     )
+    if args.skip_validation:
+        validation_sample_size = 0
+    env_max_ply = (
+        args.env_max_ply
+        if args.env_max_ply is not None
+        else cfg.get("env_max_ply")
+    )
     temperature_schedule = cfg.get("temperature_schedule")
 
     mcts_cfg = cfg.get("mcts", {})
@@ -121,6 +159,7 @@ def main() -> None:
         self_play_workers=workers,
         validation_sample_size=validation_sample_size,
         mcts_config=mcts,
+        env_factory=_make_env_factory(env_max_ply),
         early_termination=early_stop,
         step_penalty=step_penalty,
         endgame_start=endgame_start,
@@ -133,6 +172,52 @@ def main() -> None:
     trainer = SelfPlayTrainer(config)
     if args.resume_from:
         trainer.load_checkpoint(args.resume_from)
+
+    if args.print_effective_config:
+        # Instantiate once to confirm what the env factory will actually use.
+        try:
+            env_effective_max_ply = getattr(
+                config.env_factory(),
+                "_max_ply",
+                None,
+            )
+        except Exception:  # pragma: no cover
+            env_effective_max_ply = None
+        effective = {
+            "episodes_per_iteration": config.episodes_per_iteration,
+            "training_steps_per_iteration": (
+                config.training_steps_per_iteration
+            ),
+            "mcts_num_simulations": config.mcts_config.num_simulations,
+            "env_max_ply": env_max_ply,
+            "env_max_ply_effective": env_effective_max_ply,
+            "step_penalty": config.step_penalty,
+            "endgame_start": config.endgame_start,
+            "endgame_start_style": config.endgame_start_style,
+            "early_termination": vars(config.early_termination),
+        }
+        print(json.dumps({"effective_config": effective}, indent=2))
+
+    if args.print_gpu:
+        try:
+            import torch
+        except ImportError:  # pragma: no cover
+            torch = None
+        if torch is not None and torch.cuda.is_available():
+            device_name = torch.cuda.get_device_name(0)
+            capability = torch.cuda.get_device_capability(0)
+            print(
+                json.dumps(
+                    {
+                        "cuda": True,
+                        "device": device_name,
+                        "capability": capability,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(json.dumps({"cuda": False}, indent=2))
     try:
         iterator = (
             trange(args.iterations, desc="Iterations")
