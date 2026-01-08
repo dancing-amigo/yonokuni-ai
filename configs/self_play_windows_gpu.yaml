@@ -30,6 +30,6 @@ early_termination:
   enable_repetition: true
   enable_soft_maxply: false
 step_penalty: 0.001 # 1手あたりの減点（勝敗±1より十分小さく保つ）
-endgame_start: true
+endgame_start: false
 endgame_start_style: asymmetric_strong
 env_max_ply: 250

@@ -65,14 +65,6 @@ def main() -> None:
         action="store_true",
         help="Print CUDA device info once at start",
     )
-    parser.add_argument(
-        "--print-effective-config",
-        action="store_true",
-        help=(
-            "Print effective config once at start "
-            "(helps avoid config mismatch)."
-        ),
-    )
     args = parser.parse_args()
 
     cfg = {}
@@ -118,11 +110,6 @@ def main() -> None:
     )
     if args.skip_validation:
         validation_sample_size = 0
-    env_max_ply = (
-        args.env_max_ply
-        if args.env_max_ply is not None
-        else cfg.get("env_max_ply")
-    )
     temperature_schedule = cfg.get("temperature_schedule")
 
     mcts_cfg = cfg.get("mcts", {})
@@ -159,7 +146,7 @@ def main() -> None:
         self_play_workers=workers,
         validation_sample_size=validation_sample_size,
         mcts_config=mcts,
-        env_factory=_make_env_factory(env_max_ply),
+        env_factory=_make_env_factory(args.env_max_ply),
         early_termination=early_stop,
         step_penalty=step_penalty,
         endgame_start=endgame_start,
@@ -172,31 +159,6 @@ def main() -> None:
     trainer = SelfPlayTrainer(config)
     if args.resume_from:
         trainer.load_checkpoint(args.resume_from)
-
-    if args.print_effective_config:
-        # Instantiate once to confirm what the env factory will actually use.
-        try:
-            env_effective_max_ply = getattr(
-                config.env_factory(),
-                "_max_ply",
-                None,
-            )
-        except Exception:  # pragma: no cover
-            env_effective_max_ply = None
-        effective = {
-            "episodes_per_iteration": config.episodes_per_iteration,
-            "training_steps_per_iteration": (
-                config.training_steps_per_iteration
-            ),
-            "mcts_num_simulations": config.mcts_config.num_simulations,
-            "env_max_ply": env_max_ply,
-            "env_max_ply_effective": env_effective_max_ply,
-            "step_penalty": config.step_penalty,
-            "endgame_start": config.endgame_start,
-            "endgame_start_style": config.endgame_start_style,
-            "early_termination": vars(config.early_termination),
-        }
-        print(json.dumps({"effective_config": effective}, indent=2))
 
     if args.print_gpu:
         try:
